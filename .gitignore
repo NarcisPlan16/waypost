@@ -7,5 +7,5 @@ dist/
 .venv/
 venv/
 .pytest_cache/
-.tacit/
+.waypost/
 .DS_Store
