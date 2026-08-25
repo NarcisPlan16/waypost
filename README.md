@@ -19,7 +19,7 @@ through a CLI, an npm wrapper, and a Claude Skill.
 ## Install (not yet published)
 
 ```bash
-pip install -e ".[dev]"
+uv sync --extra dev
 ```
 
 ## Usage
@@ -34,8 +34,10 @@ planned but not yet implemented — each lands in its own sprint.
 ## Development
 
 ```bash
-pip install -e ".[dev]"
-pytest
+uv sync --extra dev
+uv run ruff check .
+uv run mypy src/
+uv run pytest
 ```
 
 ## Non-goals for v0.1
@@ -43,6 +45,14 @@ pytest
 LLM-generated summaries, an MCP server, diff/output compression, file-length
 linting, any write capability, and languages beyond Python and TS/JS are all
 deliberately deferred — see the roadmap doc.
+
+## Benchmarks
+
+Nothing here yet. Measured token-reduction results land here once the
+Sprint 6 benchmark runs -- per-category reductions with confidence
+intervals, the pinned repo commits and model, run count, total cost, and
+a one-command reproduction. Until then, this project makes no
+performance claims.
 
 ## License
 
