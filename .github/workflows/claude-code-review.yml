@@ -26,7 +26,7 @@ jobs:
       # is_error -- which is how this check went red while never once
       # delivering a review.
       pull-requests: write
-      issues: read
+      issues: write
       id-token: write
       # lets the reviewer read this PR's CI results
       actions: read
