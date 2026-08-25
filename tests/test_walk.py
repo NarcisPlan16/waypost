@@ -111,8 +111,8 @@ def test_hard_skip_dirs_are_pruned_without_any_gitignore(tmp_path, dirname):
         "pnpm-lock.yaml",
         "poetry.lock",
         "Cargo.lock",
+        "flake.lock",
         "go.sum",
-        "random.lock",
     ],
 )
 def test_lockfile_and_minified_names_are_hard_skipped(tmp_path, filename):
@@ -178,3 +178,69 @@ def test_skips_symlinked_files(tmp_path):
 
 def test_empty_repo_yields_nothing(tmp_path):
     assert _names(tmp_path) == set()
+
+
+def test_hand_written_lock_file_is_kept(tmp_path):
+    """`*.lock` is not a blanket skip -- only known generated lockfiles are."""
+    _touch(tmp_path / "schema.lock", "name = 1\n")
+    _touch(tmp_path / "kept.py")
+
+    assert _names(tmp_path) == {"schema.lock", "kept.py"}
+
+
+def test_follows_symlinked_directory(tmp_path):
+    """A linked source tree must not vanish from the index."""
+    _touch(tmp_path / "real" / "mod.py")
+    try:
+        os.symlink(tmp_path / "real", tmp_path / "linked", target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks not supported in this environment")
+
+    assert _names(tmp_path) == {"real/mod.py", "linked/mod.py"}
+
+
+def test_symlink_cycle_terminates(tmp_path):
+    _touch(tmp_path / "pkg" / "a.py")
+    try:
+        os.symlink(tmp_path, tmp_path / "pkg" / "loop", target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks not supported in this environment")
+
+    assert _names(tmp_path) == {"pkg/a.py"}
+
+
+def test_each_real_directory_is_walked_once(tmp_path):
+    """Two links to the same directory yield it once, not twice."""
+    _touch(tmp_path / "real" / "mod.py")
+    try:
+        os.symlink(tmp_path / "real", tmp_path / "a_link", target_is_directory=True)
+        os.symlink(tmp_path / "real", tmp_path / "b_link", target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks not supported in this environment")
+
+    result = _names(tmp_path)
+
+    assert result == {"real/mod.py", "a_link/mod.py"}
+    assert "b_link/mod.py" not in result
+
+
+def test_stops_at_max_entries_even_when_nothing_is_yielded(tmp_path, caplog):
+    """The file cap bounds output; the entry cap is what bounds the work."""
+    for i in range(20):
+        (tmp_path / f"b{i:02d}.bin").write_bytes(b"\x00")
+    _touch(tmp_path / "zzz.py")  # sorts last, so only reached if the walk runs on
+
+    with caplog.at_level(logging.WARNING, logger="waypost.walk"):
+        result = list(iter_files(tmp_path, max_entries=5))
+
+    assert result == []
+    assert any("entry limit" in r.getMessage() for r in caplog.records)
+
+
+def test_no_entry_warning_when_under_the_limit(tmp_path, caplog):
+    _touch(tmp_path / "a.py")
+
+    with caplog.at_level(logging.WARNING, logger="waypost.walk"):
+        list(iter_files(tmp_path, max_entries=100))
+
+    assert caplog.records == []

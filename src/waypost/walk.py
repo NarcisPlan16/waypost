@@ -6,9 +6,22 @@ Responsibilities (Sprint 1):
     - Skip binaries by sniffing the first 8 KB for a null byte.
     - Hard-skip vendored and generated trees: ``node_modules/``, ``.venv/``,
       ``venv/``, ``dist/``, ``build/``, ``vendor/``, ``.git/``,
-      ``__pycache__/``, ``*.min.js`` and lockfiles.
-    - Skip files larger than 1 MB, and stop at 50,000 files with a warning
-      rather than hanging on a pathological repository.
+      ``__pycache__/``, ``*.min.js`` and known lockfiles.
+    - Skip files larger than 1 MB, and stop at 50,000 *yielded* files or
+      500,000 *examined* entries, whichever comes first, with a warning
+      rather than walking a pathological repository to the end.
+
+Two caps, not one: the file cap bounds the output, but on its own it does
+not bound the work -- a tree of a million binaries yields nothing and would
+still be scanned and sniffed in full. The entry cap is what actually stops
+the walk.
+
+Symlinks: symlinked *directories* are followed, with multiple links to the same
+real directory deduplicated (the guard is the resolved path, so link cycles terminate). Skipping
+them would silently lose whole subtrees in repositories that link a source
+directory into place. Symlinked *files* are skipped -- they either duplicate
+a file already walked or point outside the tree, and an index should
+describe the target, not the link.
 
 Nested-``.gitignore`` semantics: each directory's own ``.gitignore`` is
 loaded as an independent ``pathspec`` (so within-file negation, e.g.
@@ -29,7 +42,7 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import pathspec
@@ -40,11 +53,12 @@ logger = logging.getLogger(__name__)
 # rarely useful to a symbol index and are expensive to parse.
 MAX_FILE_BYTES = 1_000_000  # 1 MB
 
-# Stop walking once this many files have been yielded. A hard ceiling so a
-# pathological repository (a huge vendored tree that slipped past
-# .gitignore, a build output nobody committed rules for) can't turn indexing
-# into an unbounded scan.
+# Stop yielding once this many files have been returned.
 MAX_FILES = 50_000
+
+# Stop walking once this many directory entries have been examined,
+# whether or not they were yielded. This is the cap that bounds the work.
+MAX_ENTRIES = 500_000
 
 # How much of a file to sniff for a null byte when deciding "binary".
 _SNIFF_BYTES = 8192
@@ -69,7 +83,9 @@ HARD_SKIP_DIRS = frozenset(
 
 # Filenames/patterns skipped everywhere, regardless of .gitignore. Generated
 # minified bundles and dependency lockfiles are large, not hand-written, and
-# not useful to a symbol map.
+# not useful to a symbol map. Listed explicitly rather than as a `*.lock`
+# glob: the glob made every entry below it dead code and swept up
+# hand-written files that happen to end in .lock.
 _HARD_SKIP_NAMES = pathspec.PathSpec.from_lines(
     "gitignore",
     [
@@ -84,8 +100,10 @@ _HARD_SKIP_NAMES = pathspec.PathSpec.from_lines(
         "Cargo.lock",
         "composer.lock",
         "Gemfile.lock",
+        "flake.lock",
+        "mix.lock",
+        "Podfile.lock",
         "go.sum",
-        "*.lock",
     ],
 )
 
@@ -96,8 +114,11 @@ _SpecStack = tuple[tuple[Path, "pathspec.PathSpec"], ...]
 class _WalkState:
     max_file_bytes: int
     max_files: int
+    max_entries: int
     count: int = 0
-    truncated: bool = False
+    examined: int = 0
+    stop_reason: str | None = None
+    visited_dirs: set[Path] = field(default_factory=set)
 
 
 def iter_files(
@@ -105,32 +126,49 @@ def iter_files(
     *,
     max_file_bytes: int = MAX_FILE_BYTES,
     max_files: int = MAX_FILES,
+    max_entries: int = MAX_ENTRIES,
 ) -> Iterator[Path]:
     """Yield source file paths under ``root``, relative to ``root``.
 
     Applies, in order: hard-skip of vendored/generated directories and
     lockfile-like names, ``.gitignore`` rules (including nested
-    ``.gitignore`` files), a size cutoff, and a binary sniff. Stops after
-    ``max_files`` files have been yielded and logs a warning rather than
-    walking a pathological tree indefinitely.
+    ``.gitignore`` files), a size cutoff, and a binary sniff. Stops once
+    ``max_files`` files have been yielded or ``max_entries`` directory
+    entries have been examined, logging a warning either way rather than
+    walking a pathological tree to the end.
+
+    Symlinked directories are followed once per real directory; symlinked
+    files are skipped. See the module docstring for the reasoning.
 
     Paths are yielded in a deterministic (name-sorted, depth-first) order so
     repeated runs over an unchanged tree produce identical output -- index
     diffs stay meaningful.
     """
     root = Path(root).resolve()
-    state = _WalkState(max_file_bytes=max_file_bytes, max_files=max_files)
+    state = _WalkState(
+        max_file_bytes=max_file_bytes,
+        max_files=max_files,
+        max_entries=max_entries,
+    )
+    state.visited_dirs.add(root)
 
     root_spec = _load_gitignore(root)
     specs: _SpecStack = ((root, root_spec),) if root_spec is not None else ()
 
     yield from _walk_dir(root, root, specs, state)
 
-    if state.truncated:
+    if state.stop_reason == "files":
         logger.warning(
             "waypost: reached the %d file limit while walking %s; "
             "stopping early, results are incomplete",
             state.max_files,
+            root,
+        )
+    elif state.stop_reason == "entries":
+        logger.warning(
+            "waypost: reached the %d entry limit while walking %s; "
+            "stopping early, results are incomplete",
+            state.max_entries,
             root,
         )
 
@@ -142,29 +180,47 @@ def _walk_dir(
     state: _WalkState,
 ) -> Iterator[Path]:
     try:
-        entries = sorted(os.scandir(dir_path), key=lambda e: e.name)
+        with os.scandir(dir_path) as scan:
+            entries = sorted(scan, key=lambda e: e.name)
     except OSError as exc:
         logger.debug("waypost: cannot list %s: %s", dir_path, exc)
         return
 
     for entry in entries:
-        if state.truncated:
+        if state.stop_reason:
             return
 
-        if entry.is_symlink():
-            continue
+        if state.examined >= state.max_entries:
+            state.stop_reason = "entries"
+            return
+        state.examined += 1
 
         entry_path = Path(entry.path)
+        is_link = entry.is_symlink()
 
-        if entry.is_dir(follow_symlinks=False):
+        if entry.is_dir(follow_symlinks=True):
             if entry.name in HARD_SKIP_DIRS:
                 continue
             if _is_ignored(entry_path, specs, is_dir=True):
                 continue
+            if is_link:
+                # Follow it, but only the first time this real directory is
+                # reached -- that is what makes link cycles terminate.
+                try:
+                    real = entry_path.resolve()
+                    real.relative_to(root)  # skip symlink targets that escape the root
+                except (OSError, ValueError):
+                    continue
+                if real in state.visited_dirs:
+                    continue
+                state.visited_dirs.add(real)
             child_spec = _load_gitignore(entry_path)
             child_specs = specs + ((entry_path, child_spec),) if child_spec is not None else specs
             yield from _walk_dir(entry_path, root, child_specs, state)
             continue
+
+        if is_link:
+            continue  # symlinked file -- see the module docstring.
 
         if not entry.is_file(follow_symlinks=False):
             continue  # sockets, FIFOs, device files -- not source.
@@ -185,7 +241,7 @@ def _walk_dir(
             continue
 
         if state.count >= state.max_files:
-            state.truncated = True
+            state.stop_reason = "files"
             return
 
         state.count += 1
