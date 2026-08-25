@@ -1,4 +1,4 @@
-# tacit
+# Waystone
 
 A zero-LLM-call repo indexer that gives AI coding agents (Claude Code, Cowork,
 and others) a token-frugal map of a codebase, instead of them grepping and
