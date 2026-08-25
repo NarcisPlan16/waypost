@@ -190,10 +190,10 @@ def _walk_dir(
         if state.stop_reason:
             return
 
-        state.examined += 1
-        if state.examined > state.max_entries:
+        if state.examined >= state.max_entries:
             state.stop_reason = "entries"
             return
+        state.examined += 1
 
         entry_path = Path(entry.path)
         is_link = entry.is_symlink()
