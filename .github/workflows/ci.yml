@@ -26,5 +26,5 @@ jobs:
       - name: Run tests
         run: pytest -q
 
-      - name: Verify tacit --version works
-        run: tacit --version
+      - name: Verify waystone --version works
+        run: waystone --version
