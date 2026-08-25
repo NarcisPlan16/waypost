@@ -208,7 +208,8 @@ def _walk_dir(
                 # reached -- that is what makes link cycles terminate.
                 try:
                     real = entry_path.resolve()
-                except OSError:
+                    real.relative_to(root)  # skip symlink targets that escape the root
+                except (OSError, ValueError):
                     continue
                 if real in state.visited_dirs:
                     continue
