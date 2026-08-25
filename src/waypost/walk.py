@@ -16,8 +16,8 @@ not bound the work -- a tree of a million binaries yields nothing and would
 still be scanned and sniffed in full. The entry cap is what actually stops
 the walk.
 
-Symlinks: symlinked *directories* are followed, each real directory at most
-once (the guard is the resolved path, so link cycles terminate). Skipping
+Symlinks: symlinked *directories* are followed, with multiple links to the same
+real directory deduplicated (the guard is the resolved path, so link cycles terminate). Skipping
 them would silently lose whole subtrees in repositories that link a source
 directory into place. Symlinked *files* are skipped -- they either duplicate
 a file already walked or point outside the tree, and an index should
