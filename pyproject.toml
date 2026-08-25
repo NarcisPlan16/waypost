@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "tacit"
+name = "waystone"
 version = "0.1.0"
 description = "Zero-LLM-call repo indexer that gives coding agents a token-frugal map of a codebase."
 readme = "README.md"
@@ -18,7 +18,7 @@ dev = [
 ]
 
 [project.scripts]
-tacit = "tacit.cli:main"
+waystone = "waystone.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/tacit"]
+packages = ["src/waystone"]

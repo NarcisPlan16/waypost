@@ -1,4 +1,4 @@
-"""tacit CLI entry point.
+"""waystone CLI entry point.
 
 Sprint 0 scope only: argument parsing scaffold + `--version`.
 Real subcommands (index | map | find | show | refs | outline | stats)
@@ -10,7 +10,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from tacit import __version__
+from waystone import __version__
 
 # Subcommands that will exist once their sprints land. Listed now so the
 # help text and error messages are honest about scope without requiring
@@ -20,7 +20,7 @@ PLANNED_COMMANDS = ["index", "map", "find", "show", "refs", "outline", "stats"]
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="tacit",
+        prog="waystone",
         description=(
             "Zero-LLM-call repo indexer that gives coding agents a "
             "token-frugal map of a codebase."
@@ -29,7 +29,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--version",
         action="version",
-        version=f"tacit {__version__}",
+        version=f"waystone {__version__}",
     )
 
     subparsers = parser.add_subparsers(dest="command")
@@ -51,7 +51,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command in PLANNED_COMMANDS:
         print(
-            f"tacit {args.command}: not implemented yet (Sprint 0 is scaffolding only)",
+            f"waystone {args.command}: not implemented yet (Sprint 0 is scaffolding only)",
             file=sys.stderr,
         )
         return 1

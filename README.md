@@ -12,7 +12,7 @@ parsing, or query logic yet. See the roadmap doc for the full sprint plan.
 Coding agents burn a large share of their input tokens re-discovering a
 codebase's structure every session: grepping for symbols, reading whole files
 to find one function, re-establishing context that a five-line signature list
-would have given them for a fraction of the cost. `tacit` builds that map
+would have given them for a fraction of the cost. `waystone` builds that map
 once, offline, deterministically — no LLM calls, no network — and serves it
 through a CLI, an npm wrapper, and a Claude Skill.
 
@@ -25,7 +25,7 @@ pip install -e ".[dev]"
 ## Usage
 
 ```bash
-tacit --version
+waystone --version
 ```
 
 Subcommands (`index`, `map`, `find`, `show`, `refs`, `outline`, `stats`) are
