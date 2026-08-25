@@ -1,4 +1,4 @@
-# Waystone
+# Waypost
 
 A zero-LLM-call repo indexer that gives AI coding agents (Claude Code, Cowork,
 and others) a token-frugal map of a codebase, instead of them grepping and
@@ -12,7 +12,7 @@ parsing, or query logic yet. See the roadmap doc for the full sprint plan.
 Coding agents burn a large share of their input tokens re-discovering a
 codebase's structure every session: grepping for symbols, reading whole files
 to find one function, re-establishing context that a five-line signature list
-would have given them for a fraction of the cost. `waystone` builds that map
+would have given them for a fraction of the cost. `waypost` builds that map
 once, offline, deterministically — no LLM calls, no network — and serves it
 through a CLI, an npm wrapper, and a Claude Skill.
 
@@ -25,7 +25,7 @@ pip install -e ".[dev]"
 ## Usage
 
 ```bash
-waystone --version
+waypost --version
 ```
 
 Subcommands (`index`, `map`, `find`, `show`, `refs`, `outline`, `stats`) are

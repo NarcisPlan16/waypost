@@ -26,5 +26,5 @@ jobs:
       - name: Run tests
         run: pytest -q
 
-      - name: Verify waystone --version works
-        run: waystone --version
+      - name: Verify waypost --version works
+        run: waypost --version
