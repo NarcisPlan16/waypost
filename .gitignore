@@ -9,3 +9,5 @@ venv/
 .pytest_cache/
 .waypost/
 .DS_Store
+.mypy_cache/
+.ruff_cache/

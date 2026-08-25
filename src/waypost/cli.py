@@ -22,8 +22,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="waypost",
         description=(
-            "Zero-LLM-call repo indexer that gives coding agents a "
-            "token-frugal map of a codebase."
+            "Zero-LLM-call repo indexer that gives coding agents a token-frugal map of a codebase."
         ),
     )
     parser.add_argument(
@@ -34,9 +33,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers = parser.add_subparsers(dest="command")
     for name in PLANNED_COMMANDS:
-        subparsers.add_parser(
-            name, help=f"(not yet implemented — lands in a later sprint)"
-        )
+        subparsers.add_parser(name, help="(not yet implemented — lands in a later sprint)")
 
     return parser
 
