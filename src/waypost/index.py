@@ -9,6 +9,13 @@ Responsibilities (Sprint 2):
     - Treat an unknown or older ``schema`` version, or corrupt JSON, as a
       trigger for a silent full rebuild -- never a crash, and never a stale
       wrong answer.
+
+An index also records **how it was ranked** -- the strategy and the
+``--focus`` paths that produced its scores. Without that, any later refresh
+has to guess, and the default guess silently reverted a repository indexed
+with ``--rank pagerank`` back to ``simple`` scores on the next
+``waypost map --refresh``. Ranking configuration is a property of the index,
+so it lives in the index.
 """
 
 from __future__ import annotations
@@ -22,14 +29,15 @@ from pathlib import Path
 from typing import Any
 
 from waypost.parse import ParsedFile, Reference, Symbol, parse_file
-from waypost.rank import compute_ranks
+from waypost.rank import DEFAULT_STRATEGY, STRATEGIES, compute_ranks
 from waypost.walk import iter_files
 
 logger = logging.getLogger(__name__)
 
 # Bump when the on-disk shape changes. `load` refuses anything else and
 # triggers a full rebuild rather than guessing how to migrate it.
-SCHEMA_VERSION = 1
+# 2: added `rank_strategy` and `focus`.
+SCHEMA_VERSION = 2
 
 # Relative to a repo root -- kept in one place so `index`, CLI commands and
 # tests all agree on where the index lives.
@@ -48,11 +56,18 @@ class FileEntry:
 
 @dataclass
 class Index:
-    """The whole on-disk index: schema version, root and every file entry."""
+    """The whole on-disk index: schema, root, ranking config, file entries.
+
+    ``rank_strategy`` and ``focus`` are the settings that produced the
+    stored ranks, kept so a refresh reproduces them instead of falling back
+    to the defaults and quietly re-scoring the repository.
+    """
 
     root: str
     files: dict[str, FileEntry] = field(default_factory=dict)
     schema: int = SCHEMA_VERSION
+    rank_strategy: str = DEFAULT_STRATEGY
+    focus: tuple[str, ...] = ()
 
 
 def default_index_path(root: Path | str) -> Path:
@@ -67,7 +82,7 @@ def _sha256_bytes(data: bytes) -> str:
 def build(
     root: Path | str,
     *,
-    rank_strategy: str = "simple",
+    rank_strategy: str = DEFAULT_STRATEGY,
     personalize: Iterable[str] | None = None,
 ) -> Index:
     """Full index build: walk, parse every file, rank the result.
@@ -78,9 +93,11 @@ def build(
 
     ``personalize`` is forwarded to :func:`waypost.rank.compute_ranks` and
     only means anything under ``rank_strategy="pagerank"``; it carries the
-    CLI's ``--focus`` paths.
+    CLI's ``--focus`` paths. Both are recorded on the returned index so a
+    later :func:`refresh` can reproduce the same scoring.
     """
     root = Path(root)
+    focus = tuple(personalize or ())
     parsed_by_path: dict[str, ParsedFile] = {}
     shas: dict[str, str] = {}
 
@@ -99,20 +116,26 @@ def build(
         parsed_by_path[parsed.path] = parsed
         shas[parsed.path] = _sha256_bytes(data)
 
-    ranks = compute_ranks(parsed_by_path, strategy=rank_strategy, personalize=personalize)
+    ranks = compute_ranks(parsed_by_path, strategy=rank_strategy, personalize=focus)
 
     files = {
         path: FileEntry(sha256=shas[path], rank=ranks.get(path, 0.0), parsed=parsed)
         for path, parsed in parsed_by_path.items()
     }
-    return Index(root=root.as_posix(), files=files, schema=SCHEMA_VERSION)
+    return Index(
+        root=root.as_posix(),
+        files=files,
+        schema=SCHEMA_VERSION,
+        rank_strategy=rank_strategy,
+        focus=focus,
+    )
 
 
 def refresh(
     root: Path | str,
     existing: Index | None,
     *,
-    rank_strategy: str = "simple",
+    rank_strategy: str | None = None,
     personalize: Iterable[str] | None = None,
 ) -> Index:
     """Incremental refresh: reparse only files whose content SHA changed.
@@ -122,11 +145,21 @@ def refresh(
     recomputed in full over the resulting file set -- cheap enough that
     incrementalising it isn't worth the bug surface.
 
+    ``rank_strategy`` and ``personalize`` default to **whatever produced
+    ``existing``**, not to the module defaults. Refreshing an index is not
+    an occasion to re-score it differently: a repository indexed with
+    ``--rank pagerank --focus src/api`` stays that way until someone says
+    otherwise. Pass a value to override, or ``personalize=()`` to clear the
+    focus explicitly.
+
     ``existing=None`` (no prior index, or one that failed to load) makes
     this equivalent to :func:`build`.
     """
+    strategy = rank_strategy if rank_strategy is not None else _inherited_strategy(existing)
+    focus = tuple(personalize) if personalize is not None else _inherited_focus(existing)
+
     if existing is None:
-        return build(root, rank_strategy=rank_strategy, personalize=personalize)
+        return build(root, rank_strategy=strategy, personalize=focus)
 
     root = Path(root)
     parsed_by_path: dict[str, ParsedFile] = {}
@@ -155,13 +188,27 @@ def refresh(
         parsed_by_path[parsed.path] = parsed
         shas[parsed.path] = sha
 
-    ranks = compute_ranks(parsed_by_path, strategy=rank_strategy, personalize=personalize)
+    ranks = compute_ranks(parsed_by_path, strategy=strategy, personalize=focus)
 
     files = {
         path: FileEntry(sha256=shas[path], rank=ranks.get(path, 0.0), parsed=parsed)
         for path, parsed in parsed_by_path.items()
     }
-    return Index(root=root.as_posix(), files=files, schema=SCHEMA_VERSION)
+    return Index(
+        root=root.as_posix(),
+        files=files,
+        schema=SCHEMA_VERSION,
+        rank_strategy=strategy,
+        focus=focus,
+    )
+
+
+def _inherited_strategy(existing: Index | None) -> str:
+    return existing.rank_strategy if existing is not None else DEFAULT_STRATEGY
+
+
+def _inherited_focus(existing: Index | None) -> tuple[str, ...]:
+    return existing.focus if existing is not None else ()
 
 
 def _symbol_to_dict(sym: Symbol) -> dict[str, Any]:
@@ -177,6 +224,8 @@ def to_dict(index: Index) -> dict[str, Any]:
     return {
         "schema": index.schema,
         "root": index.root,
+        "rank_strategy": index.rank_strategy,
+        "focus": list(index.focus),
         "files": {
             path: {
                 "sha256": entry.sha256,
@@ -206,7 +255,22 @@ def _dict_to_index(data: dict[str, Any]) -> Index:
             truncated=raw["truncated"],
         )
         files[path] = FileEntry(sha256=raw["sha256"], rank=raw["rank"], parsed=parsed)
-    return Index(root=data["root"], files=files, schema=data["schema"])
+
+    # A strategy this build doesn't know would only surface later, as a
+    # ValueError from `compute_ranks` in the middle of a refresh. Reject it
+    # here instead: `load` turns that into the same silent rebuild every
+    # other malformed index gets.
+    strategy = data["rank_strategy"]
+    if strategy not in STRATEGIES:
+        raise ValueError(f"unknown rank strategy: {strategy!r}")
+
+    return Index(
+        root=data["root"],
+        files=files,
+        schema=data["schema"],
+        rank_strategy=strategy,
+        focus=tuple(data["focus"]),
+    )
 
 
 def save(index: Index, path: Path | str | None = None) -> Path:

@@ -5,6 +5,7 @@ from waypost.rank import (
     compute_ranks,
     inbound_reference_counts,
     is_test_path,
+    matches_focus,
     pagerank_rank,
     simple_rank,
 )
@@ -124,3 +125,31 @@ def test_pagerank_personalize_biases_toward_focus_files():
     scores = pagerank_rank({"a.py": a, "b.py": b}, personalize=["a.py"])
 
     assert scores["a.py"] > scores["b.py"]
+
+
+def test_pagerank_personalize_accepts_a_directory_not_only_an_exact_file():
+    """`--focus src/api` names a directory far more often than a file.
+
+    Matching focus paths by equality made that case personalise toward the
+    empty set, i.e. silently do nothing at all.
+    """
+    api = _file("src/api/routes.py")
+    other = _file("src/util/helpers.py")
+
+    scores = pagerank_rank(
+        {"src/api/routes.py": api, "src/util/helpers.py": other}, personalize=["src/api"]
+    )
+
+    assert scores["src/api/routes.py"] > scores["src/util/helpers.py"]
+
+
+def test_focus_matches_a_path_prefix_but_not_a_partial_directory_name():
+    assert matches_focus("src/api/routes.py", ["src/api"])
+    assert matches_focus("src/api/routes.py", ["src/api/routes.py"])
+    assert matches_focus("src/api/routes.py", ["./src/api/"])
+    assert matches_focus("src/api/routes.py", ["src\\api"])
+    # `src/apiary` is not under `src/api`.
+    assert not matches_focus("src/apiary/routes.py", ["src/api"])
+    assert not matches_focus("src/api/routes.py", [])
+    # A leading dot is part of the name, not something to strip.
+    assert matches_focus(".github/workflows/ci.yml", [".github"])

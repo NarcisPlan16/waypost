@@ -47,6 +47,7 @@ from pathlib import Path
 
 from waypost.index import Index
 from waypost.parse import Symbol
+from waypost.rank import matches_focus, normalise_path
 from waypost.tokens import TRUNCATION_MARKER, Tokenizer, count, fit_lines, get_tokenizer
 
 # Defaults chosen to be useful in an agent's first turn without being a
@@ -198,16 +199,15 @@ def _ranked_paths(index: Index, focus: Iterable[str] | None = None) -> list[str]
 
     ``focus`` paths (prefix match, so a directory works) sort ahead of
     everything else while keeping their relative rank order -- that is what
-    ``map --focus src/api`` means: not a filter, a promotion.
+    ``map --focus src/api`` means: not a filter, a promotion. The prefix
+    rule itself is :func:`waypost.rank.matches_focus`, shared with
+    pagerank's personalisation so the flag means one thing.
     """
     prefixes = tuple(focus) if focus else ()
 
-    def is_focused(path: str) -> bool:
-        return any(path == p or path.startswith(p.rstrip("/") + "/") for p in prefixes)
-
     return sorted(
         index.files,
-        key=lambda p: (not is_focused(p), -index.files[p].rank, p),
+        key=lambda p: (not matches_focus(p, prefixes), -index.files[p].rank, p),
     )
 
 
@@ -458,16 +458,28 @@ def render_find(
     limit: int = DEFAULT_FIND_LIMIT,
     budget: int = DEFAULT_LIST_BUDGET,
     tokenizer: Tokenizer | None = None,
+    hits: Sequence[Hit] | None = None,
 ) -> str:
-    hits = search(index, pattern, limit=limit)
+    """``hits`` lets a caller that already searched pass the result in.
+
+    The CLI needs the hits anyway, to pick an exit code. Without this it
+    searched every symbol in the index twice per invocation.
+    """
+    hits = search(index, pattern, limit=limit) if hits is None else hits
     if not hits:
         return f"no symbol matching {pattern!r} in {len(index.files)} indexed files"
     lines = [_hit_line(hit) for hit in hits]
     return _render(lines, budget, tokenizer)
 
 
-def find_data(index: Index, pattern: str, *, limit: int = DEFAULT_FIND_LIMIT) -> dict:
-    hits = search(index, pattern, limit=limit)
+def find_data(
+    index: Index,
+    pattern: str,
+    *,
+    limit: int = DEFAULT_FIND_LIMIT,
+    hits: Sequence[Hit] | None = None,
+) -> dict:
+    hits = search(index, pattern, limit=limit) if hits is None else hits
     return {
         "pattern": pattern,
         "count": len(hits),
@@ -525,14 +537,18 @@ def render_show(
     budget: int = DEFAULT_SHOW_BUDGET,
     max_matches: int = 3,
     tokenizer: Tokenizer | None = None,
+    hits: Sequence[Hit] | None = None,
 ) -> str:
     """Print the source span of ``name``, and nothing around it.
 
     Several files can define the same name -- ``parse.py`` resolves by name,
     not by scope. Rather than guess, this shows the best-ranked few and says
     how many others there were.
+
+    ``hits`` accepts an already-computed :func:`definitions` result, so a
+    caller that needed it for its own reasons doesn't pay for it twice.
     """
-    hits = definitions(index, name)
+    hits = definitions(index, name) if hits is None else hits
     if not hits:
         near = search(index, name, limit=5)
         if near:
@@ -560,8 +576,9 @@ def show_data(
     *,
     root: Path | str | None = None,
     max_matches: int = 3,
+    hits: Sequence[Hit] | None = None,
 ) -> dict:
-    hits = definitions(index, name)
+    hits = definitions(index, name) if hits is None else hits
     root = root if root is not None else index.root
     return {
         "name": name,
@@ -583,7 +600,11 @@ def show_data(
 # --------------------------------------------------------------------------
 
 
-def referencing_files(index: Index, name: str) -> list[tuple[str, float, list[tuple[int, str]]]]:
+# One referring file: its path, its rank, and the (line, kind) of each site.
+Referrer = tuple[str, float, list[tuple[int, str]]]
+
+
+def referencing_files(index: Index, name: str) -> list[Referrer]:
     """Files referencing ``name``, ranked, with the (line, kind) of each site.
 
     Matching is by the reference's own name, which is unqualified at a call
@@ -593,7 +614,7 @@ def referencing_files(index: Index, name: str) -> list[tuple[str, float, list[tu
     the edges the ranking actually counted.
     """
     target = name.rsplit(".", 1)[-1].lower()
-    out: list[tuple[str, float, list[tuple[int, str]]]] = []
+    out: list[Referrer] = []
     for path, entry in index.files.items():
         sites = sorted(
             {(ref.line, ref.kind) for ref in entry.parsed.refs if ref.name.lower() == target}
@@ -610,9 +631,13 @@ def render_refs(
     *,
     budget: int = DEFAULT_LIST_BUDGET,
     tokenizer: Tokenizer | None = None,
+    defined: Sequence[Hit] | None = None,
+    referrers: Sequence[Referrer] | None = None,
 ) -> str:
-    defined = definitions(index, name)
-    referrers = referencing_files(index, name)
+    """``defined``/``referrers`` accept already-computed results; see
+    :func:`render_find`."""
+    defined = definitions(index, name) if defined is None else defined
+    referrers = referencing_files(index, name) if referrers is None else referrers
 
     if not defined and not referrers:
         return f"no definitions or references to {name!r} in {len(index.files)} indexed files"
@@ -636,12 +661,19 @@ def render_refs(
     return _render(lines, budget, tokenizer)
 
 
-def refs_data(index: Index, name: str) -> dict:
+def refs_data(
+    index: Index,
+    name: str,
+    *,
+    defined: Sequence[Hit] | None = None,
+    referrers: Sequence[Referrer] | None = None,
+) -> dict:
+    defined = definitions(index, name) if defined is None else defined
+    referrers = referencing_files(index, name) if referrers is None else referrers
     return {
         "name": name,
         "definitions": [
-            {"path": h.path, "rank": round(h.rank, 4), **_symbol_dict(h.symbol)}
-            for h in definitions(index, name)
+            {"path": h.path, "rank": round(h.rank, 4), **_symbol_dict(h.symbol)} for h in defined
         ],
         "references": [
             {
@@ -649,7 +681,7 @@ def refs_data(index: Index, name: str) -> dict:
                 "rank": round(rank, 4),
                 "sites": [{"line": line, "kind": kind} for line, kind in sites],
             }
-            for path, rank, sites in referencing_files(index, name)
+            for path, rank, sites in referrers
         ],
     }
 
@@ -666,7 +698,7 @@ def resolve_path(index: Index, path: str) -> str | None:
     ``src/waypost/client.py`` -- and refusing the short form for no reason
     costs a round trip.
     """
-    wanted = path.replace("\\", "/").lstrip("./")
+    wanted = normalise_path(path)
     if wanted in index.files:
         return wanted
     candidates = [p for p in index.files if p == wanted or p.endswith("/" + wanted)]
@@ -684,7 +716,7 @@ def render_outline(
 ) -> str:
     resolved = resolve_path(index, path)
     if resolved is None:
-        matches = [p for p in index.files if p.endswith("/" + path.replace("\\", "/"))]
+        matches = [p for p in index.files if p.endswith("/" + normalise_path(path))]
         if matches:
             listed = "\n".join(f"{_INDENT}{p}" for p in sorted(matches))
             return f"{path!r} is ambiguous; did you mean:\n{listed}"

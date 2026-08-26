@@ -148,6 +148,64 @@ def test_index_reports_a_missing_root(tmp_path, capsys):
     assert "not a directory" in err
 
 
+@pytest.mark.parametrize("command", ["map", "find", "show", "refs", "outline", "stats"])
+def test_query_commands_report_a_missing_root_instead_of_inventing_one(tmp_path, capsys, command):
+    """A mistyped `--root` is an error, not an empty repository.
+
+    Only `index` checked, so `waypost map --root typo` walked nothing,
+    reported success, and left a stray `.waypost/index.json` inside a
+    directory it had just created.
+    """
+    missing = tmp_path / "nope"
+    argv = [command, "--root", str(missing)]
+    if command in {"find", "show", "refs", "outline"}:
+        argv.append("whatever")
+
+    code, _out, err = run(capsys, *argv)
+
+    assert code == EXIT_ERROR
+    assert "not a directory" in err
+    assert not missing.exists()
+
+
+def test_index_remembers_its_rank_strategy_across_a_plain_reindex(repo, capsys):
+    run(capsys, "index", "--root", str(repo), "--rank", "pagerank", "--focus", "src/app")
+
+    code, out, _err = run(capsys, "index", "--root", str(repo))
+
+    assert code == EXIT_OK
+    assert "rank=pagerank" in out
+    assert "focus=src/app" in out
+
+
+def test_index_rank_can_still_be_changed_explicitly(repo, capsys):
+    run(capsys, "index", "--root", str(repo), "--rank", "pagerank")
+
+    code, out, _err = run(capsys, "index", "--root", str(repo), "--rank", "simple")
+
+    assert code == EXIT_OK
+    assert "rank=simple" in out
+
+
+def test_refreshing_a_query_does_not_re_rank_the_repository(repo, capsys):
+    """`map --refresh` updates files; it does not redefine what "important" means.
+
+    Refresh used to fall back to the default strategy, so one `--refresh`
+    silently replaced a pagerank index with a simple-ranked one.
+    """
+    run(capsys, "index", "--root", str(repo), "--rank", "pagerank", "--focus", "src/app")
+    before = json.loads(default_index_path(repo).read_text(encoding="utf-8"))
+
+    run(capsys, "map", "--root", str(repo), "--refresh")
+    after = json.loads(default_index_path(repo).read_text(encoding="utf-8"))
+
+    assert after["rank_strategy"] == "pagerank"
+    assert after["focus"] == ["src/app"]
+    assert {p: e["rank"] for p, e in after["files"].items()} == {
+        p: e["rank"] for p, e in before["files"].items()
+    }
+
+
 # --------------------------------------------------------------------------
 # query commands
 # --------------------------------------------------------------------------

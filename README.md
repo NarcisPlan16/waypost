@@ -84,6 +84,7 @@ uv sync --extra dev
 
 ```bash
 waypost index                     # build .waypost/index.json (once, then on demand)
+waypost index --rank pagerank --focus src/api   # and remember that from now on
 
 waypost map                       # ranked symbol map, 2000 tokens by default
 waypost map --budget 800 --focus src/api
@@ -100,8 +101,17 @@ read the stored index rather than re-walking the repository — that is what
 keeps them fast — so pass `--refresh` after changing files, or re-run
 `waypost index`. A missing index is built automatically on first use.
 
+An index remembers how it was ranked. `--rank` and `--focus` are settings of
+the index, not of a single command, so a repository indexed with `--rank
+pagerank --focus src/api` keeps those scores through every `--refresh` and
+every plain `waypost index`; changing them takes another explicit `--rank` or
+`--focus`. `--focus` is a path prefix everywhere it appears — a directory
+works, and means the same thing to pagerank's personalisation as it does to
+`map`'s ordering.
+
 Exit codes are meant to be branched on: `0` success, `1` nothing matched,
-`2` a real error.
+`2` a real error — including a `--root` that is not a directory, which every
+command checks before it does anything.
 
 ## Development
 

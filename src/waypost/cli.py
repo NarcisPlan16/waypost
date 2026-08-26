@@ -18,7 +18,10 @@ is a bad first impression.
 **Not-found is exit 1, not an error.** ``find``, ``show``, ``refs`` and
 ``outline`` exit 1 when they match nothing, with the explanation on stdout.
 An agent can branch on the code; a human can read the line. Genuine failures
-(no such root, a bad ``--rank``) exit 2 with the message on stderr.
+(no such root, a bad ``--rank``) exit 2 with the message on stderr. ``--root``
+is checked for every command, not just ``index``: a mistyped root once
+produced an empty map, exit 0, and a stray ``.waypost/`` directory created
+under the path that did not exist.
 
 **Everything goes to stdout except diagnostics.** Notes about rebuilding,
 and the ``--measure`` token count, go to stderr, so piping ``waypost map``
@@ -34,13 +37,13 @@ from pathlib import Path
 
 from waypost import __version__, render
 from waypost import index as index_mod
+from waypost import rank as rank_mod
+from waypost.rank import STRATEGIES as RANK_STRATEGIES
 from waypost.tokens import count, get_tokenizer
 
 # Kept for the help text and for tests that assert the surface; every one of
 # these now has a real implementation.
 PLANNED_COMMANDS = ["index", "map", "find", "show", "refs", "outline", "stats"]
-
-RANK_STRATEGIES = ("simple", "pagerank")
 
 EXIT_OK = 0
 EXIT_NOT_FOUND = 1
@@ -100,18 +103,24 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_index = subparsers.add_parser("index", help="build or refresh .waypost/index.json")
     _add_common(p_index)
+    # `None`, not "simple", so a re-index can tell "the user asked for the
+    # default" apart from "the user said nothing" and keep whatever the
+    # existing index was built with.
     p_index.add_argument(
         "--rank",
         choices=RANK_STRATEGIES,
-        default="simple",
-        help="ranking strategy (default: simple)",
+        default=None,
+        help="ranking strategy (default: simple, or whatever the existing index used)",
     )
     p_index.add_argument(
         "--focus",
         action="append",
-        default=[],
+        default=None,
         metavar="PATH",
-        help="bias pagerank personalisation toward this path; repeatable",
+        help=(
+            "bias pagerank personalisation toward this path or directory; "
+            "repeatable (default: whatever the existing index used)"
+        ),
     )
     p_index.add_argument(
         "--force",
@@ -177,7 +186,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _emit(text: str, args: argparse.Namespace) -> None:
     """Print output, then the measurement if asked for."""
-    print(text)
+    # Flushed before the note: stdout is block-buffered through a pipe and
+    # stderr is not, so without this the measurement overtakes the output it
+    # is measuring in a combined terminal transcript.
+    print(text, flush=True)
     if getattr(args, "measure", False):
         tokenizer = get_tokenizer()
         print(
@@ -195,6 +207,12 @@ def _acquire_index(args: argparse.Namespace) -> tuple[index_mod.Index, Path]:
 
     Returns the index and the path it lives at (``stats`` reports the file
     size, and a caller that rebuilt should not have to guess where it went).
+
+    A refresh here passes no ranking arguments on purpose: ``index.refresh``
+    reuses the strategy and focus stored in the index it was given, so
+    ``map --refresh`` cannot quietly re-score a repository that was indexed
+    with ``--rank pagerank``. Re-ranking is what ``waypost index --rank`` is
+    for.
     """
     root: Path = args.root
     path = index_mod.default_index_path(root)
@@ -215,15 +233,19 @@ def _acquire_index(args: argparse.Namespace) -> tuple[index_mod.Index, Path]:
 
 def _cmd_index(args: argparse.Namespace) -> int:
     root: Path = args.root
-    if not root.is_dir():
-        print(f"waypost: {root} is not a directory", file=sys.stderr)
-        return EXIT_ERROR
-
     path = index_mod.default_index_path(root)
-    existing = None if args.force else index_mod.load(path)
-    focus = args.focus or None
 
-    updated = index_mod.refresh(root, existing, rank_strategy=args.rank, personalize=focus)
+    # Loaded even under `--force`: a full rebuild discards the parsed file
+    # data, not the ranking configuration the user chose for this repo.
+    stored = index_mod.load(path)
+    existing = None if args.force else stored
+
+    updated = index_mod.refresh(
+        root,
+        existing,
+        rank_strategy=args.rank if args.rank is not None else _stored_strategy(stored),
+        personalize=args.focus if args.focus is not None else _stored_focus(stored),
+    )
     index_mod.save(updated, path)
 
     data = render.stats_data(updated, index_path=path)
@@ -234,12 +256,21 @@ def _cmd_index(args: argparse.Namespace) -> int:
     mode = "rebuilt" if existing is None else "refreshed"
     written = data["index_bytes"]
     size = "unknown size" if written is None else f"{written / 1024:.0f} KiB"
+    focus_note = f", focus={','.join(updated.focus)}" if updated.focus else ""
     _emit(
         f"{mode} {path}: {data['files']} files, {data['symbols']} symbols, "
-        f"{data['loc']} loc, {size}, rank={args.rank}",
+        f"{data['loc']} loc, {size}, rank={updated.rank_strategy}{focus_note}",
         args,
     )
     return EXIT_OK
+
+
+def _stored_strategy(stored: index_mod.Index | None) -> str:
+    return stored.rank_strategy if stored is not None else rank_mod.DEFAULT_STRATEGY
+
+
+def _stored_focus(stored: index_mod.Index | None) -> tuple[str, ...]:
+    return stored.focus if stored is not None else ()
 
 
 def _cmd_map(args: argparse.Namespace) -> int:
@@ -253,38 +284,50 @@ def _cmd_map(args: argparse.Namespace) -> int:
 
 
 def _cmd_find(args: argparse.Namespace) -> int:
+    # Searched once and handed to the renderer: the exit code and the output
+    # come from the same result rather than from two identical scans of every
+    # symbol in the index.
     idx, _ = _acquire_index(args)
     hits = render.search(idx, args.pattern, limit=args.limit)
     if args.json:
-        _emit_json(render.find_data(idx, args.pattern, limit=args.limit), args)
+        _emit_json(render.find_data(idx, args.pattern, limit=args.limit, hits=hits), args)
     else:
-        _emit(render.render_find(idx, args.pattern, limit=args.limit, budget=args.budget), args)
+        _emit(
+            render.render_find(idx, args.pattern, limit=args.limit, budget=args.budget, hits=hits),
+            args,
+        )
     return EXIT_OK if hits else EXIT_NOT_FOUND
 
 
 def _cmd_show(args: argparse.Namespace) -> int:
     idx, _ = _acquire_index(args)
-    found = bool(render.definitions(idx, args.name))
+    hits = render.definitions(idx, args.name)
     if args.json:
-        _emit_json(render.show_data(idx, args.name, max_matches=args.max_matches), args)
+        _emit_json(render.show_data(idx, args.name, max_matches=args.max_matches, hits=hits), args)
     else:
         _emit(
-            render.render_show(idx, args.name, budget=args.budget, max_matches=args.max_matches),
+            render.render_show(
+                idx, args.name, budget=args.budget, max_matches=args.max_matches, hits=hits
+            ),
             args,
         )
-    return EXIT_OK if found else EXIT_NOT_FOUND
+    return EXIT_OK if hits else EXIT_NOT_FOUND
 
 
 def _cmd_refs(args: argparse.Namespace) -> int:
     idx, _ = _acquire_index(args)
-    found = bool(render.definitions(idx, args.name)) or bool(
-        render.referencing_files(idx, args.name)
-    )
+    defined = render.definitions(idx, args.name)
+    referrers = render.referencing_files(idx, args.name)
     if args.json:
-        _emit_json(render.refs_data(idx, args.name), args)
+        _emit_json(render.refs_data(idx, args.name, defined=defined, referrers=referrers), args)
     else:
-        _emit(render.render_refs(idx, args.name, budget=args.budget), args)
-    return EXIT_OK if found else EXIT_NOT_FOUND
+        _emit(
+            render.render_refs(
+                idx, args.name, budget=args.budget, defined=defined, referrers=referrers
+            ),
+            args,
+        )
+    return EXIT_OK if defined or referrers else EXIT_NOT_FOUND
 
 
 def _cmd_outline(args: argparse.Namespace) -> int:
@@ -328,6 +371,13 @@ def main(argv: list[str] | None = None) -> int:
     handler = _HANDLERS.get(args.command)
     if handler is None:  # pragma: no cover -- argparse rejects unknown commands first.
         parser.print_help()
+        return EXIT_ERROR
+
+    # Checked once, for every command. A query command that skipped this
+    # walked a nonexistent root, found nothing, wrote an empty index into a
+    # directory it had just created, and reported success.
+    if not args.root.is_dir():
+        print(f"waypost: {args.root} is not a directory", file=sys.stderr)
         return EXIT_ERROR
 
     try:
