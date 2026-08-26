@@ -7,9 +7,37 @@ re-reading whole files.
 **Status: pre-alpha, no released version.** `walk.py` finds the files;
 `parse.py` extracts symbols from Python, JavaScript, TypeScript and TSX;
 `index.py` builds and persists a schema-versioned index with incremental
-refresh by content SHA, and `rank.py` scores files. There is no command
-output yet — budget-aware rendering and the real CLI subcommands are the
-next piece of work.
+refresh by content SHA; `rank.py` scores files; and `tokens.py` /
+`render.py` turn all of that into budgeted output behind the seven CLI
+subcommands. The tool is usable end to end. What it does not yet have is
+the npm wrapper, the Claude Skill, and — the part that decides whether any
+of it was worth building — the benchmark.
+
+### Token budgets are measured, not estimated
+
+`map --budget 2000` emits at most 2,000 tokens as counted by the configured
+tokenizer, and the cut always lands on a whole symbol. Selection is a binary
+search over an ordered list of symbols for the largest prefix whose
+*rendered* output fits, so the guarantee is a property of one function
+(`tokens.fit_lines`) rather than of each renderer's arithmetic — counting
+content and a truncation notice separately, then adding them, is off by a
+token or two, which for the one function whose job is not exceeding a number
+is the whole ballgame. `tests/test_render.py` asserts the ceiling holds
+across budgets from 0 to 5,000 under both tokenizers.
+
+A small budget buys a map of the repository rather than a very thorough
+listing of its single highest-ranked file: top-level classes and exported
+functions for *every* file in rank order come first, and private helpers
+fill whatever is left. Raising the budget only ever adds lines, never
+reshuffles them.
+
+The default tokenizer is tiktoken's `cl100k_base`. That is not Claude's
+tokenizer, and nothing published is — what a budget guarantees is a hard,
+reproducible ceiling under a *named* tokenizer, which every output that
+quotes a number reports. `tiktoken` also downloads its BPE table on first
+use; since this package promises no network, a machine that cannot load it
+falls back to a deterministic offline tokenizer that over-counts rather than
+risking an under-count. `WAYPOST_TOKENIZER=heuristic` forces that path.
 
 ### What `parse.py` extracts, and what it deliberately doesn't
 
@@ -55,11 +83,25 @@ uv sync --extra dev
 ## Usage
 
 ```bash
-waypost --version
+waypost index                     # build .waypost/index.json (once, then on demand)
+
+waypost map                       # ranked symbol map, 2000 tokens by default
+waypost map --budget 800 --focus src/api
+waypost find "*_client"           # locate symbols by name, substring or glob
+waypost show Client.request       # that symbol's own source span, nothing around it
+waypost refs build_client         # where it is defined, and every file that uses it
+waypost outline src/client.py     # every symbol in one file
+waypost stats                     # what the index holds
 ```
 
-Subcommands (`index`, `map`, `find`, `show`, `refs`, `outline`, `stats`) are
-planned but not yet implemented — each lands in its own sprint.
+Every command takes `--root`, `--json`, `--budget` and `--measure` (which
+reports the token count of what it just printed, on stderr). Query commands
+read the stored index rather than re-walking the repository — that is what
+keeps them fast — so pass `--refresh` after changing files, or re-run
+`waypost index`. A missing index is built automatically on first use.
+
+Exit codes are meant to be branched on: `0` success, `1` nothing matched,
+`2` a real error.
 
 ## Development
 

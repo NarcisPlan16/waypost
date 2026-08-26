@@ -114,6 +114,7 @@ class costs tokens in every ``map`` for little localisation value.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from functools import cache
@@ -135,6 +136,12 @@ _ELLIPSIS = "..."
 # Used to close a bracket that a clipped multi-line signature left open, so
 # `EXTENSION_LANGUAGES = {` reads as `EXTENSION_LANGUAGES = {...}`.
 _BRACKET_PAIRS = {"{": "}", "(": ")", "[": "]"}
+
+# Spacing artefacts left behind when a wrapped signature is collapsed onto
+# one line. See `_tidy_punctuation`.
+_SPACE_AFTER_OPEN_RE = re.compile(r"([(\[{]) +")
+_SPACE_BEFORE_PUNCT_RE = re.compile(r" +([)\]},;])")
+_DANGLING_COMMA_RE = re.compile(r",([)\]}])")
 
 # Extension -> language-pack language name. Deliberately limited to the v0.1
 # scope (Python and TS/JS); adding a language means adding fixtures for it.
@@ -692,8 +699,35 @@ def _signature(node: Node, source: bytes) -> str:
     text = _declaration_keyword(node, source) + " ".join(
         source[node.start_byte : end].decode("utf-8", "replace").split()
     )
+    text = _tidy_punctuation(text)
     text = _elide(text) if elided else _strip_signature_tail(text)
     return _truncate(text, MAX_SIGNATURE_CHARS)
+
+
+def _tidy_punctuation(text: str) -> str:
+    """Undo the spacing artefacts of collapsing a multi-line signature.
+
+    Whitespace-collapsing a signature that was wrapped over several lines
+    leaves punctuation where the line breaks were::
+
+        def fit_lines( lines: Sequence[str], budget: int, ) -> list[str]
+
+    Every one of those spaces, and the trailing comma the formatter left
+    before the closing bracket, costs tokens in every ``map`` that shows the
+    symbol. Measured on this repository: 23 of 521 signatures are affected,
+    and those 23 shrink by 5% (860 tokens to 818) -- worth about one extra
+    symbol in a 2,000-token map. Small, and the reason to do it anyway is
+    that it is free and it makes a wrapped signature read like the
+    one-liner it would have been under a longer line limit.
+
+    The rewrite is textual, so a string literal in a default argument can be
+    caught by it (``sep=" ,"`` would lose its space). That is accepted: this
+    is a display signature that is already whitespace-collapsed and clipped
+    at 200 characters, not a source-recoverable one. It is never parsed back.
+    """
+    text = _SPACE_AFTER_OPEN_RE.sub(r"\1", text)
+    text = _SPACE_BEFORE_PUNCT_RE.sub(r"\1", text)
+    return _DANGLING_COMMA_RE.sub(r"\1", text)
 
 
 def _elide(text: str) -> str:
