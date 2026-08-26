@@ -43,6 +43,7 @@ span.
 ```bash
 waypost index                     # build/refresh .waypost/index.json (once, then on demand)
 waypost map --budget 2000         # ranked symbol map across the repo, budgeted in tokens
+waypost map --focus src/api       # same map, with these paths sorted first
 waypost find "*_client"           # locate symbols by name (substring or glob)
 waypost show Client.request       # one symbol's own source span, nothing around it
 waypost refs build_client         # where a symbol is defined, and every file that calls it
@@ -50,11 +51,14 @@ waypost outline src/client.py     # every symbol in one file
 waypost stats                     # what the index currently holds
 ```
 
-All commands accept `--root <path>` (defaults to cwd), `--json` for
-machine-readable output, and `--budget <n>` to cap token output. A missing
-index is built automatically on first use; pass `--refresh` to any query
-command to rebuild before answering. Exit code `1` means nothing matched
-(not an error); `2` means a real failure (bad root, bad flag).
+Every command accepts `--root <path>` (defaults to cwd), `--json` for
+machine-readable output, and `--measure` to print the output's real token
+count to stderr. The six query commands additionally accept `--budget <n>`
+to cap token output and `--refresh` to re-index changed files before
+answering (`index` takes neither: it always writes, and it is what `--refresh`
+calls). A missing index is built automatically on first use. Exit code `1`
+means nothing matched (not an error); `2` means a real failure (bad root,
+bad flag).
 
 ## Notes
 
