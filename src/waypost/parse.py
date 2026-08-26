@@ -172,6 +172,7 @@ _CONTAINER_TYPES = frozenset(
         "enum_declaration",  # ts
         "function_declaration",  # js/ts (nested functions)
         "variable_declarator",  # js/ts `const handlers = { onOpen: () => ... }`
+        "pair",  # js/ts nested literal: `{ group: { onOpen: ... } }`
     }
 )
 
@@ -191,6 +192,19 @@ _FUNCTION_TYPES = frozenset(
 
 # Node types that mark a definition as part of the module's public surface.
 _EXPORT_TYPES = frozenset({"export_statement"})
+
+# Nodes that can sit between a value and the name it is bound to without
+# changing what it is bound to. `const routes = { ... } as const` still binds
+# an object literal to `routes`.
+_WRAPPER_TYPES = frozenset(
+    {
+        "as_expression",  # ts `x as const`
+        "satisfies_expression",  # ts `x satisfies T`
+        "parenthesized_expression",
+        "non_null_expression",  # ts `x!`
+        "type_assertion",  # ts `<T>x`
+    }
+)
 
 # Per-language supplementary definitions: node type -> symbol kind. These
 # cover query gaps (findings 6 and 7), not forms the query already handles.
@@ -585,14 +599,23 @@ def _is_navigable_pair(node: Node) -> bool:
     The test has to be positive -- "is this object bound to a name?" -- rather
     than "is this inside a function?". A config object passed to a top-level
     call is inside no function at all, so the negative test let it through.
+
+    Positive tests fail closed, which is the safer direction but not a free
+    one: the first version of this climb tolerated only `object` and `pair`
+    between the key and its declarator, so `const routes = { ... } as const`
+    -- an everyday TypeScript idiom for exactly the dispatch table this
+    function exists to keep -- lost every key. `_WRAPPER_TYPES` is the list of
+    things that can sit in that gap without changing the answer to "is this
+    object bound to a name?".
     """
     if _inside_function_body(node):
         return False
     current = node
     while current.parent is not None:
         parent = current.parent
-        if parent.type in {"object", "pair"}:
-            # Nested literal: keep climbing to whatever binds the outermost one.
+        if parent.type in {"object", "pair"} or parent.type in _WRAPPER_TYPES:
+            # Nested literal, or a wrapper that does not rebind: keep climbing
+            # to whatever binds the outermost object.
             current = parent
             continue
         if parent.type == "variable_declarator":
@@ -620,7 +643,14 @@ def _qualify(node: Node, name: str, source: bytes) -> str:
     current = node.parent
     while current is not None:
         if current.type in _CONTAINER_TYPES:
-            container_name = current.child_by_field_name("name")
+            # A `pair` names its container through `key`, everything else
+            # through `name`. Without the fallback, a key nested two levels
+            # into an object literal skipped the level above it:
+            # `const h = { group: { onOpen } }` recorded `h.onOpen`, a name
+            # that does not exist and cannot be looked up.
+            container_name = current.child_by_field_name("name") or current.child_by_field_name(
+                "key"
+            )
             if container_name is not None:
                 text = _text(container_name, source)
                 if text:
@@ -883,6 +913,24 @@ def _import_names(node: Node, source: bytes) -> Iterator[str]:
         # `import * as NS from "./ns"` binds `NS` locally and nothing else;
         # there is no original name to match against, so the module string
         # already emitted is the whole of the dependency edge.
+        return
+    if node.type == "import_clause":
+        # A default import's binding is a bare `identifier` child of the
+        # clause -- `import Default from "./m"` -- and the name is chosen by
+        # the importer, not declared by the target. Sometimes it matches what
+        # the other module exports; when the export is anonymous
+        # (`export default function () {}`) there is nothing it could match,
+        # because nothing is indexed under any name there.
+        #
+        # This is the same shape as the alias bug: a local-only name in a
+        # graph whose whole job is matching references to definitions
+        # elsewhere. Dropped rather than kept on a naming convention. The
+        # module string is still emitted, so the file-to-file edge that
+        # ranking actually runs over is unaffected -- only the guess at
+        # *which symbol* goes away.
+        for child in node.named_children:
+            if child.type != "identifier":
+                yield from _import_names(child, source)
         return
     for child in node.named_children:
         yield from _import_names(child, source)

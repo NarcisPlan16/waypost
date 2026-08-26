@@ -102,12 +102,23 @@ export function withDefaults(opts: Partial<Options>): Options {
   return { retries: INTERNAL_RETRIES, ...opts };
 }
 
+// The everyday TS idiom for a dispatch table. `as const` sits between the
+// object and its declarator and must not hide the keys.
+export const routes = {
+  home: () => "/",
+  about: () => "/about",
+} as const;
+
 export namespace Internals {
   export function checksum(data: string): number {
     return data.length;
   }
 
   export const SEED = 7;
+
+  export namespace Deep {
+    export const NESTED_SEED = 11;
+  }
 }
 
 export { Codec as Wire, Frame } from "./protocol";
