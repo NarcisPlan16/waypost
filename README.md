@@ -4,10 +4,12 @@ A zero-LLM-call repo indexer that gives AI coding agents (Claude Code, Cowork,
 and others) a token-frugal map of a codebase, instead of them grepping and
 re-reading whole files.
 
-**Status: Sprint 1 (discovery + symbol extraction).** `walk.py` finds the
-files; `parse.py` extracts symbols from Python, JavaScript, TypeScript and
-TSX. There is no index, no ranking and no command output yet — those are
-Sprints 2 and 3. See the roadmap doc for the full sprint plan.
+**Status: pre-alpha, no released version.** `walk.py` finds the files;
+`parse.py` extracts symbols from Python, JavaScript, TypeScript and TSX;
+`index.py` builds and persists a schema-versioned index with incremental
+refresh by content SHA, and `rank.py` scores files. There is no command
+output yet — budget-aware rendering and the real CLI subcommands are the
+next piece of work.
 
 ### What `parse.py` extracts, and what it deliberately doesn't
 
@@ -72,7 +74,7 @@ uv run pytest
 
 LLM-generated summaries, an MCP server, diff/output compression, file-length
 linting, any write capability, and languages beyond Python and TS/JS are all
-deliberately deferred — see the roadmap doc.
+deliberately deferred.
 
 ## Benchmarks
 
