@@ -30,6 +30,21 @@ jobs:
         with:
           fetch-depth: 1
 
+      # The reviewing agent must be able to EXECUTE the test suite, not just read it.
+      # Three review rounds (#10, #12 twice) were done statically because every
+      # `pytest` / `ruff` / `mypy` call came back "requires approval". Those rounds
+      # still found real defects, but a reviewer that cannot run anything cannot
+      # check whether the numbers in a PR body are true -- which is the whole exit
+      # criterion from Sprint 2 onward. These two steps pre-install the environment
+      # so `uv run pytest` works the moment Claude asks for it.
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install package + dev deps
+        run: uv sync --extra dev
+
       - name: Run Claude Code
         id: claude
         uses: anthropics/claude-code-action@v1
@@ -40,11 +55,11 @@ jobs:
           additional_permissions: |
             actions: read
 
-          # Optional: Give a custom prompt to Claude. If this is not specified, Claude will perform the instructions specified in the comment that tagged it.
-          # prompt: 'Update the pull request description to include a summary of changes.'
-
-          # Optional: Add claude_args to customize behavior and configuration
-          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          # or https://code.claude.com/docs/en/cli-reference for available options
-          # claude_args: '--allowed-tools Bash(gh pr *)'
+          # Bash is allowed as a whole, deliberately. An enumerated allowlist was
+          # tried twice and failed twice: Copilot Autofix narrowed it to
+          # `Bash(gh *)` / `Bash(git *)` on #9 (silently reverting that PR's whole
+          # point), and the deleted claude-code-review.yml kept outgrowing its own
+          # list. This job holds read-only `contents` / `pull-requests` / `issues`
+          # permissions, so the blast radius is this ephemeral runner.
+          claude_args: '--allowed-tools Bash'
 
