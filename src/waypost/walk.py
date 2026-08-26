@@ -16,7 +16,7 @@ not bound the work -- a tree of a million binaries yields nothing and would
 still be scanned and sniffed in full. The entry cap is what actually stops
 the walk.
 
-Symlinks are not followed, and each skip is logged rather than silent.
+Symlinked directories are not followed, and each skip is logged rather than silent.
 Following them turned out to be wrong in both directions: a link whose
 target is inside the root indexes the same file twice under two paths,
 which is exactly the bloat this tool exists to avoid, and a link whose
