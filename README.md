@@ -9,9 +9,10 @@ re-reading whole files.
 `index.py` builds and persists a schema-versioned index with incremental
 refresh by content SHA; `rank.py` scores files; and `tokens.py` /
 `render.py` turn all of that into budgeted output behind the seven CLI
-subcommands. The tool is usable end to end. What it does not yet have is
-the npm wrapper, the Claude Skill, and — the part that decides whether any
-of it was worth building — the benchmark.
+subcommands. The tool is usable end to end, and now has an npm wrapper
+(`bin/waypost.js`) and a Claude Skill (`SKILL.md`) on top of the CLI. What
+it does not yet have — the part that decides whether any of it was worth
+building — is the benchmark.
 
 ### Token budgets are measured, not estimated
 
@@ -79,6 +80,22 @@ through a CLI, an npm wrapper, and a Claude Skill.
 ```bash
 uv sync --extra dev
 ```
+
+Once published, `npx waypost <command>` will work on a clean machine with no
+prior setup: `bin/waypost.js` is a thin resolver, not a bundled runtime — it
+execs whichever of `waypost` (already on PATH), `uvx waypost`, `pipx run
+waypost`, or `python3 -m waypost` / `python -m waypost` it finds first, and
+exits `2` with an install hint if none resolve. It makes no LLM calls and
+adds no logic beyond that resolution; the indexer it hands off to is exactly
+the one described in this README.
+
+## Claude Skill
+
+`SKILL.md` at the repo root tells an agent when to reach for `waypost`
+(getting oriented, finding a symbol, reading one function, tracing refs,
+outlining a file) and when not to (small repos, non-Python/JS/TS files,
+edits that need the real file content). Point a Claude Code / Claude Skill
+setup at this repo to pick it up.
 
 ## Usage
 

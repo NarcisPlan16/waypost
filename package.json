@@ -1,0 +1,30 @@
+{
+  "name": "waypost",
+  "version": "0.1.0-dev.0",
+  "description": "Zero-LLM-call repo indexer that gives coding agents a token-frugal map of a codebase.",
+  "bin": {
+    "waypost": "bin/waypost.js"
+  },
+  "files": [
+    "bin/waypost.js"
+  ],
+  "engines": {
+    "node": ">=16"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NarcisPlan16/waypost.git"
+  },
+  "homepage": "https://github.com/NarcisPlan16/waypost",
+  "bugs": {
+    "url": "https://github.com/NarcisPlan16/waypost/issues"
+  },
+  "keywords": [
+    "ai",
+    "coding-agent",
+    "repo-map",
+    "tree-sitter",
+    "claude"
+  ]
+}
