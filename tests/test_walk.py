@@ -188,15 +188,15 @@ def test_hand_written_lock_file_is_kept(tmp_path):
     assert _names(tmp_path) == {"schema.lock", "kept.py"}
 
 
-def test_follows_symlinked_directory(tmp_path):
-    """A linked source tree must not vanish from the index."""
+def test_in_root_symlinked_directory_is_not_indexed_twice(tmp_path):
+    """The link's target is already indexed under its real path."""
     _touch(tmp_path / "real" / "mod.py")
     try:
         os.symlink(tmp_path / "real", tmp_path / "linked", target_is_directory=True)
     except (OSError, NotImplementedError):
         pytest.skip("symlinks not supported in this environment")
 
-    assert _names(tmp_path) == {"real/mod.py", "linked/mod.py"}
+    assert _names(tmp_path) == {"real/mod.py"}
 
 
 def test_symlink_cycle_terminates(tmp_path):
@@ -209,8 +209,7 @@ def test_symlink_cycle_terminates(tmp_path):
     assert _names(tmp_path) == {"pkg/a.py"}
 
 
-def test_each_real_directory_is_walked_once(tmp_path):
-    """Two links to the same directory yield it once, not twice."""
+def test_many_links_to_one_directory_still_yield_it_once(tmp_path):
     _touch(tmp_path / "real" / "mod.py")
     try:
         os.symlink(tmp_path / "real", tmp_path / "a_link", target_is_directory=True)
@@ -218,10 +217,39 @@ def test_each_real_directory_is_walked_once(tmp_path):
     except (OSError, NotImplementedError):
         pytest.skip("symlinks not supported in this environment")
 
-    result = _names(tmp_path)
+    assert _names(tmp_path) == {"real/mod.py"}
 
-    assert result == {"real/mod.py", "a_link/mod.py"}
-    assert "b_link/mod.py" not in result
+
+def test_external_symlinked_directory_is_skipped_and_reported(tmp_path, caplog):
+    """Content outside the root stays out of the index -- but not silently."""
+    outside = tmp_path / "outside"
+    _touch(outside / "shared" / "lib.py")
+    repo = tmp_path / "repo"
+    _touch(repo / "app.py")
+    try:
+        os.symlink(outside / "shared", repo / "vendored", target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks not supported in this environment")
+
+    with caplog.at_level(logging.INFO, logger="waypost.walk"):
+        result = _names(repo)
+
+    assert result == {"app.py"}
+    assert any("outside the indexed root" in r.getMessage() for r in caplog.records)
+
+
+def test_in_root_link_skip_is_not_noisy(tmp_path, caplog):
+    """An in-root link loses nothing, so it must not warn about anything."""
+    _touch(tmp_path / "real" / "mod.py")
+    try:
+        os.symlink(tmp_path / "real", tmp_path / "linked", target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks not supported in this environment")
+
+    with caplog.at_level(logging.INFO, logger="waypost.walk"):
+        _names(tmp_path)
+
+    assert caplog.records == []
 
 
 def test_stops_at_max_entries_even_when_nothing_is_yielded(tmp_path, caplog):
