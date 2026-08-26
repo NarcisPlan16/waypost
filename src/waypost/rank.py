@@ -35,10 +35,48 @@ DEFAULT_DAMPING = 0.85
 DEFAULT_ITERATIONS = 100
 DEFAULT_TOLERANCE = 1.0e-8
 
+# Every strategy `compute_ranks` accepts. The CLI's `--rank` choices come
+# from here, and `index.load` validates a stored strategy against it, so
+# there is one list rather than three that can drift apart.
+STRATEGIES = ("simple", "pagerank")
+
+DEFAULT_STRATEGY = "simple"
+
 
 def is_test_path(path: str) -> bool:
     """True if ``path`` looks like a test file, by name or directory."""
     return _TEST_PATH_RE.search(path) is not None
+
+
+def normalise_path(path: str) -> str:
+    """A user-supplied path in the form index keys use: posix, no ``./``.
+
+    Only a literal leading ``./`` is removed -- stripping the characters
+    ``.`` and ``/`` individually would turn ``.github/workflows`` into
+    ``github/workflows`` and match nothing.
+    """
+    cleaned = path.replace("\\", "/")
+    while cleaned.startswith("./"):
+        cleaned = cleaned[2:]
+    return cleaned
+
+
+def matches_focus(path: str, prefixes: Iterable[str]) -> bool:
+    """True if ``path`` is one of ``prefixes`` or lives under one of them.
+
+    ``--focus`` means the same thing everywhere it appears: a path prefix,
+    so a directory works. This is the single definition of that, shared by
+    :func:`pagerank_rank`'s personalisation and ``render``'s map ordering --
+    they disagreed once, and ``index --focus src/api`` silently personalised
+    toward nothing because it matched no file exactly.
+    """
+    for prefix in prefixes:
+        normalised = normalise_path(prefix).rstrip("/")
+        if not normalised:
+            continue
+        if path == normalised or path.startswith(normalised + "/"):
+            return True
+    return False
 
 
 def _defining_files(files: Mapping[str, ParsedFile]) -> dict[str, list[str]]:
@@ -138,7 +176,11 @@ def pagerank_rank(
     graph = _reference_graph(files)
     out_degree = {path: len(targets) for path, targets in graph.items()}
 
-    focus = {p for p in personalize if p in files} if personalize else set()
+    # Prefix matching, not equality: `--focus src/api` names a directory far
+    # more often than it names a file, and an exact-match-only focus set is
+    # empty in that case -- personalisation silently doing nothing.
+    prefixes = list(personalize) if personalize else []
+    focus = {p for p in paths if matches_focus(p, prefixes)} if prefixes else set()
     if focus:
         teleport = {p: (1.0 / len(focus) if p in focus else 0.0) for p in paths}
     else:
@@ -172,13 +214,14 @@ def pagerank_rank(
 def compute_ranks(
     files: Mapping[str, ParsedFile],
     *,
-    strategy: str = "simple",
+    strategy: str = DEFAULT_STRATEGY,
     personalize: Iterable[str] | None = None,
 ) -> dict[str, float]:
     """Entry point: per-file importance scores under ``strategy``.
 
     ``"simple"`` (the default) is cheap and explainable; ``"pagerank"`` is
-    the graph-based alternative gated behind ``--rank pagerank``.
+    the graph-based alternative gated behind ``--rank pagerank``. ``strategy``
+    must be one of :data:`STRATEGIES`.
     """
     if strategy == "simple":
         return simple_rank(files)

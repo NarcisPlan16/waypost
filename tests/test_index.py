@@ -126,5 +126,69 @@ def test_refresh_recomputes_ranks_over_final_file_set(tmp_path):
     assert second.files["lib.py"].rank < first.files["lib.py"].rank
 
 
+# --------------------------------------------------------------------------
+# ranking configuration is a property of the index, and survives a refresh
+# --------------------------------------------------------------------------
+
+
+def test_the_index_records_how_it_was_ranked(tmp_path):
+    _write(tmp_path / "a.py", "def foo():\n    pass\n")
+
+    index = build(tmp_path, rank_strategy="pagerank", personalize=["a.py"])
+
+    assert index.rank_strategy == "pagerank"
+    assert index.focus == ("a.py",)
+
+
+def test_rank_configuration_survives_a_save_load_round_trip(tmp_path):
+    _write(tmp_path / "a.py", "def foo():\n    pass\n")
+    index = build(tmp_path, rank_strategy="pagerank", personalize=["src"])
+
+    loaded = load(save(index, default_index_path(tmp_path)))
+
+    assert loaded is not None
+    assert loaded.rank_strategy == "pagerank"
+    assert loaded.focus == ("src",)
+
+
+def test_refresh_keeps_the_strategy_that_built_the_index(tmp_path):
+    """A refresh is not an occasion to silently re-score the repository.
+
+    Defaulting `rank_strategy` to "simple" here meant `waypost map --refresh`
+    threw away a pagerank index without saying so.
+    """
+    _write(tmp_path / "a.py", "def foo():\n    pass\n")
+    first = build(tmp_path, rank_strategy="pagerank", personalize=["a.py"])
+
+    second = refresh(tmp_path, first)
+
+    assert second.rank_strategy == "pagerank"
+    assert second.focus == ("a.py",)
+    assert second.files["a.py"].rank == first.files["a.py"].rank
+
+
+def test_refresh_still_honours_an_explicit_override(tmp_path):
+    _write(tmp_path / "a.py", "def foo():\n    pass\n")
+    first = build(tmp_path, rank_strategy="pagerank", personalize=["a.py"])
+
+    second = refresh(tmp_path, first, rank_strategy="simple", personalize=())
+
+    assert second.rank_strategy == "simple"
+    assert second.focus == ()
+
+
+def test_load_rejects_a_strategy_this_build_does_not_know(tmp_path, caplog):
+    """Better a rebuild now than a ValueError from the middle of a refresh."""
+    _write(tmp_path / "a.py", "def foo():\n    pass\n")
+    path = save(build(tmp_path), default_index_path(tmp_path))
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["rank_strategy"] = "telepathy"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with caplog.at_level(logging.WARNING):
+        assert load(path) is None
+    assert "malformed" in caplog.text
+
+
 def test_default_index_path(tmp_path):
     assert default_index_path(tmp_path) == tmp_path / ".waypost" / "index.json"
