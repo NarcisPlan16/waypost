@@ -313,6 +313,50 @@ def test_multiline_values_are_clipped_to_their_first_line():
     assert symbols["NAMES"] == "NAMES = [...]"
 
 
+def test_a_wrapped_signature_reads_as_if_it_had_been_written_on_one_line():
+    """Collapsing a multi-line signature must not leave its line breaks behind.
+
+    Those spaces and the formatter's trailing comma cost tokens in every
+    `map` that shows the symbol, and a line-length-100 codebase wraps a lot
+    of signatures.
+    """
+    source = (
+        b"def fit_lines(\n"
+        b"    lines: Sequence[str],\n"
+        b"    budget: int,\n"
+        b"    *,\n"
+        b"    marker: str = MARKER,\n"
+        b") -> list[str]:\n"
+        b"    return []\n"
+    )
+
+    parsed = parse_source(source, language="python", path="t.py")
+
+    assert parsed.defs[0].signature == (
+        "def fit_lines(lines: Sequence[str], budget: int, *, marker: str = MARKER) -> list[str]"
+    )
+
+
+def test_wrapped_signatures_tidy_up_in_typescript_too():
+    source = (
+        b"export function send(\n  body: RequestBody,\n  retries: number,\n): Promise<void> {}\n"
+    )
+
+    parsed = parse_source(source, language="typescript", path="t.ts")
+
+    assert parsed.defs[0].signature == (
+        "function send(body: RequestBody, retries: number): Promise<void>"
+    )
+
+
+def test_tidying_does_not_touch_a_signature_that_was_already_one_line():
+    source = b"def f(a, b=(1, 2), c=[3], d={'k': 4}):\n    pass\n"
+
+    parsed = parse_source(source, language="python", path="t.py")
+
+    assert parsed.defs[0].signature == "def f(a, b=(1, 2), c=[3], d={'k': 4})"
+
+
 def test_signature_is_truncated_rather_than_unbounded():
     params = ", ".join(f"argument_number_{i}: string" for i in range(40))
     source = f"export function wide({params}): void {{}}\n".encode()

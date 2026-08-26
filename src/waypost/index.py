@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -63,12 +64,21 @@ def _sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def build(root: Path | str, *, rank_strategy: str = "simple") -> Index:
+def build(
+    root: Path | str,
+    *,
+    rank_strategy: str = "simple",
+    personalize: Iterable[str] | None = None,
+) -> Index:
     """Full index build: walk, parse every file, rank the result.
 
     Files ``walk.iter_files`` yields but ``parse.parse_file`` can't handle
     (unsupported extension, unreadable, unparseable) are silently absent --
     both modules already log why, so nothing is re-logged here.
+
+    ``personalize`` is forwarded to :func:`waypost.rank.compute_ranks` and
+    only means anything under ``rank_strategy="pagerank"``; it carries the
+    CLI's ``--focus`` paths.
     """
     root = Path(root)
     parsed_by_path: dict[str, ParsedFile] = {}
@@ -89,7 +99,7 @@ def build(root: Path | str, *, rank_strategy: str = "simple") -> Index:
         parsed_by_path[parsed.path] = parsed
         shas[parsed.path] = _sha256_bytes(data)
 
-    ranks = compute_ranks(parsed_by_path, strategy=rank_strategy)
+    ranks = compute_ranks(parsed_by_path, strategy=rank_strategy, personalize=personalize)
 
     files = {
         path: FileEntry(sha256=shas[path], rank=ranks.get(path, 0.0), parsed=parsed)
@@ -98,7 +108,13 @@ def build(root: Path | str, *, rank_strategy: str = "simple") -> Index:
     return Index(root=root.as_posix(), files=files, schema=SCHEMA_VERSION)
 
 
-def refresh(root: Path | str, existing: Index | None, *, rank_strategy: str = "simple") -> Index:
+def refresh(
+    root: Path | str,
+    existing: Index | None,
+    *,
+    rank_strategy: str = "simple",
+    personalize: Iterable[str] | None = None,
+) -> Index:
     """Incremental refresh: reparse only files whose content SHA changed.
 
     A file present before but no longer yielded by the walk (deleted,
@@ -110,7 +126,7 @@ def refresh(root: Path | str, existing: Index | None, *, rank_strategy: str = "s
     this equivalent to :func:`build`.
     """
     if existing is None:
-        return build(root, rank_strategy=rank_strategy)
+        return build(root, rank_strategy=rank_strategy, personalize=personalize)
 
     root = Path(root)
     parsed_by_path: dict[str, ParsedFile] = {}
@@ -139,7 +155,7 @@ def refresh(root: Path | str, existing: Index | None, *, rank_strategy: str = "s
         parsed_by_path[parsed.path] = parsed
         shas[parsed.path] = sha
 
-    ranks = compute_ranks(parsed_by_path, strategy=rank_strategy)
+    ranks = compute_ranks(parsed_by_path, strategy=rank_strategy, personalize=personalize)
 
     files = {
         path: FileEntry(sha256=shas[path], rank=ranks.get(path, 0.0), parsed=parsed)
