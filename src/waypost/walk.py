@@ -16,12 +16,17 @@ not bound the work -- a tree of a million binaries yields nothing and would
 still be scanned and sniffed in full. The entry cap is what actually stops
 the walk.
 
-Symlinks: symlinked *directories* are followed, with multiple links to the same
-real directory deduplicated (the guard is the resolved path, so link cycles terminate). Skipping
-them would silently lose whole subtrees in repositories that link a source
-directory into place. Symlinked *files* are skipped -- they either duplicate
-a file already walked or point outside the tree, and an index should
-describe the target, not the link.
+Symlinked directories are not followed, and each skip is logged rather than silent.
+Following them turned out to be wrong in both directions: a link whose
+target is inside the root indexes the same file twice under two paths,
+which is exactly the bloat this tool exists to avoid, and a link whose
+target is outside the root lets the index reach files the repository does
+not contain. Skipping both keeps the index a faithful description of the
+tree, and matches what git itself does. The cost is a repository that
+links a source directory in from elsewhere -- that content is not indexed,
+so the skip is reported at INFO level with the resolved target, and an
+in-root link (whose contents *are* indexed, under their real path) is
+reported at DEBUG.
 
 Nested-``.gitignore`` semantics: each directory's own ``.gitignore`` is
 loaded as an independent ``pathspec`` (so within-file negation, e.g.
@@ -42,7 +47,7 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 import pathspec
@@ -118,7 +123,6 @@ class _WalkState:
     count: int = 0
     examined: int = 0
     stop_reason: str | None = None
-    visited_dirs: set[Path] = field(default_factory=set)
 
 
 def iter_files(
@@ -150,7 +154,6 @@ def iter_files(
         max_files=max_files,
         max_entries=max_entries,
     )
-    state.visited_dirs.add(root)
 
     root_spec = _load_gitignore(root)
     specs: _SpecStack = ((root, root_spec),) if root_spec is not None else ()
@@ -204,16 +207,8 @@ def _walk_dir(
             if _is_ignored(entry_path, specs, is_dir=True):
                 continue
             if is_link:
-                # Follow it, but only the first time this real directory is
-                # reached -- that is what makes link cycles terminate.
-                try:
-                    real = entry_path.resolve()
-                    real.relative_to(root)  # skip symlink targets that escape the root
-                except (OSError, ValueError):
-                    continue
-                if real in state.visited_dirs:
-                    continue
-                state.visited_dirs.add(real)
+                _log_skipped_link(entry_path, root)
+                continue
             child_spec = _load_gitignore(entry_path)
             child_specs = specs + ((entry_path, child_spec),) if child_spec is not None else specs
             yield from _walk_dir(entry_path, root, child_specs, state)
@@ -246,6 +241,30 @@ def _walk_dir(
 
         state.count += 1
         yield entry_path.relative_to(root)
+
+
+def _log_skipped_link(link_path: Path, root: Path) -> None:
+    """Say why a symlinked directory was not walked. Never silently."""
+    try:
+        real = link_path.resolve()
+    except OSError as exc:
+        logger.debug("waypost: skipping unresolvable symlink %s: %s", link_path, exc)
+        return
+    try:
+        real.relative_to(root)
+    except ValueError:
+        logger.info(
+            "waypost: not following %s -> %s; the target is outside the indexed "
+            "root, so its contents are absent from the index",
+            link_path,
+            real,
+        )
+        return
+    logger.debug(
+        "waypost: not following %s -> %s; already indexed under its real path",
+        link_path,
+        real,
+    )
 
 
 def _load_gitignore(dir_path: Path) -> pathspec.PathSpec | None:
