@@ -102,7 +102,12 @@
       "Internals.checksum": "function",
       "Internals.SEED": "constant",
       "Session": "class",
-      "Session.open": "method"
+      "Session.open": "method",
+      "routes": "constant",
+      "routes.home": "function",
+      "routes.about": "function",
+      "Internals.Deep": "module",
+      "Internals.Deep.NESTED_SEED": "constant"
     },
     "excluded_by_design": {
       "Config.constructor": "the bundled JS query excludes constructors; a class already carries the reader there",
@@ -114,7 +119,9 @@
       "Method.Post": "same",
       "NODE_ONLY": "bound inside a module-level `if` guard; block-scoped, not a module constant",
       "Wire": "a re-export alias is bound nowhere else; the reference records `Codec`",
-      "Legacy": "`export * as Legacy` binds a local name only; the module string is the whole edge"
+      "Legacy": "`export * as Legacy` binds a local name only; the module string is the whole edge",
+      "home": "a key of an `as const` table is still owned by its binding, never bare",
+      "NESTED_SEED": "same -- a nested namespace constant is qualified by both namespaces"
     }
   },
   "sample_javascript.js": {
@@ -153,7 +160,9 @@
       "Sequencer": "constant",
       "Sequencer.next": "method",
       "nextId": "function",
-      "createRegistry": "function"
+      "createRegistry": "function",
+      "dispatch": "constant",
+      "dispatch.socket.onOpen": "function"
     },
     "excluded_by_design": {
       "Config.constructor": "the bundled JS query excludes constructors",
@@ -164,7 +173,10 @@
       "seeded": "bound inside a module-level `for`; re-created every iteration",
       "onError": "key of an object passed straight into a call -- no declarator to qualify it against",
       "onRetry": "same",
-      "Wire": "a re-export alias is bound nowhere else; the reference records `Transport`"
+      "Wire": "a re-export alias is bound nowhere else; the reference records `Transport`",
+      "Registry": "a default import binds a name this file chose, not one `./registry` declares",
+      "dispatch.socket": "an object-valued key is a level of nesting, not a symbol; its keys are",
+      "dispatch.onOpen": "the un-nested name -- `socket` must not be dropped from the qualification"
     }
   },
   "sample_tsx.tsx": {

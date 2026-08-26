@@ -7,6 +7,8 @@
 
 const path = require("node:path");
 import { Logger } from "./logger";
+// A default import binds a name this file chose, not one `./registry` declares.
+import Registry from "./registry";
 
 export const DEFAULT_TIMEOUT = 30;
 const INTERNAL_RETRIES = 3;
@@ -149,6 +151,14 @@ const nextId = function* () {
 
 export { Transport as Wire, Frame } from "./protocol";
 export * from "./errors";
+
+// Two levels of object literal: the key's owner is `dispatch.socket`, not
+// `dispatch`, and the qualified name has to say so.
+const dispatch = {
+  socket: {
+    onOpen: () => Logger.info("open"),
+  },
+};
 
 export default function createRegistry() {
   return new Map();

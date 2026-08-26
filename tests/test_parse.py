@@ -671,3 +671,81 @@ def test_a_syntax_error_stays_quiet():
 
     assert parsed is not None
     assert parsed.truncated is True
+
+
+# --------------------------------------------------------------------------
+# Second review round on PR #12
+#
+# The first round's fixes introduced one regression of their own: a positive
+# test fails closed, and `_is_navigable_pair` closed on a shape it should
+# have kept.
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "binding",
+    [
+        "const t = { onOpen: () => {} } as const;",
+        "const t = { onOpen: () => {} } satisfies Record<string, () => void>;",
+        "const t = ({ onOpen: () => {} });",
+        "const t = { onOpen: () => {} }!;",
+    ],
+)
+def test_a_wrapper_between_object_and_binding_does_not_hide_its_keys(binding):
+    """`as const` on a dispatch table is the idiom, not the exception.
+
+    Introduced by the previous round's fix: the climb tolerated only `object`
+    and `pair` between a key and its declarator, so anything wrapping the
+    object made every key inside it vanish. A false negative rather than a
+    false positive -- the safer direction, but still a recall miss against a
+    shape real TypeScript is full of.
+    """
+    found = _defs(binding + "\n", "typescript")
+
+    assert found.get("t.onOpen") == "function", f"keys lost for: {binding}"
+
+
+def test_a_key_nested_two_levels_deep_keeps_both_owners():
+    """`h.onOpen` is a name that does not exist and cannot be looked up."""
+    found = _defs("const h = { group: { onOpen: () => {} } };\n", "javascript")
+
+    assert "h.group.onOpen" in found
+    assert "h.onOpen" not in found
+
+
+def test_a_default_import_is_not_recorded_as_a_symbol_reference():
+    """The importer chooses that name; the exporting module never declares it.
+
+    `export default function () {}` is indexed under no name at all, so for an
+    anonymous default there is nothing the reference could ever match -- the
+    same dead-reference shape as the aliased-import bug. The module string is
+    still emitted, so the file-to-file edge survives.
+    """
+    refs = _refs('import Registry, { helper } from "./registry";\n', "javascript")
+
+    assert ("./registry", "import") in refs
+    assert ("helper", "import") in refs
+    assert ("Registry", "import") not in refs
+
+
+def test_nested_namespaces_qualify_through_every_level():
+    """Traced by hand in review; pinned here so it stays true."""
+    found = _defs(
+        "export namespace Outer {\n  export namespace Inner {\n    export const X = 1;\n  }\n}\n",
+        "typescript",
+    )
+
+    assert found.get("Outer.Inner") == "module"
+    assert found.get("Outer.Inner.X") == "constant"
+
+
+@pytest.mark.parametrize(
+    "block",
+    [
+        "label: { const X = 1; }",
+        "switch (k) { case 1: const X = 1; }",
+    ],
+)
+def test_other_block_forms_are_still_not_module_constants(block):
+    """The whitelist's other side: forms nobody thought to list must fail closed."""
+    assert "X" not in _defs(block + "\n", "javascript")
