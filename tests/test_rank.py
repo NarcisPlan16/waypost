@@ -1,0 +1,126 @@
+from __future__ import annotations
+
+from waypost.parse import ParsedFile, Reference, Symbol
+from waypost.rank import (
+    compute_ranks,
+    inbound_reference_counts,
+    is_test_path,
+    pagerank_rank,
+    simple_rank,
+)
+
+
+def _file(path, defs=(), refs=(), loc=10) -> ParsedFile:
+    return ParsedFile(path=path, language="python", loc=loc, defs=tuple(defs), refs=tuple(refs))
+
+
+def test_is_test_path():
+    assert is_test_path("tests/test_foo.py")
+    assert is_test_path("src/foo_test.py")
+    assert is_test_path("src/foo.test.ts")
+    assert is_test_path("src/foo.spec.ts")
+    assert not is_test_path("src/waypost/rank.py")
+    assert not is_test_path("src/contest.py")
+
+
+def test_inbound_reference_counts_matches_by_name_and_ignores_self_refs():
+    lib = _file(
+        "lib.py",
+        defs=[Symbol(name="helper", kind="function", line=1, end_line=2, signature="def helper()")],
+    )
+    caller = _file(
+        "caller.py",
+        refs=[Reference(name="helper", kind="call", line=1)],
+    )
+    lib_with_self_ref = _file(
+        "lib.py",
+        defs=lib.defs,
+        refs=[Reference(name="helper", kind="call", line=5)],
+    )
+
+    files = {"lib.py": lib_with_self_ref, "caller.py": caller}
+    counts = inbound_reference_counts(files)
+
+    assert counts["lib.py"] == 1  # only caller.py's ref counts, not lib.py's own
+    assert counts["caller.py"] == 0
+
+
+def test_inbound_reference_counts_resolves_qualified_names_by_tail():
+    lib = _file(
+        "lib.py",
+        defs=[
+            Symbol(
+                name="Client.request",
+                kind="function",
+                line=3,
+                end_line=4,
+                signature="def request(self)",
+            )
+        ],
+    )
+    caller = _file("caller.py", refs=[Reference(name="request", kind="call", line=1)])
+
+    counts = inbound_reference_counts({"lib.py": lib, "caller.py": caller})
+
+    assert counts["lib.py"] == 1
+
+
+def test_simple_rank_rewards_inbound_refs_and_exports_penalises_tests():
+    lib = _file(
+        "lib.py",
+        defs=[
+            Symbol(
+                name="helper",
+                kind="function",
+                line=1,
+                end_line=2,
+                signature="def helper()",
+                exported=True,
+            )
+        ],
+    )
+    caller = _file("caller.py", refs=[Reference(name="helper", kind="call", line=1)])
+    test_file = _file(
+        "tests/test_lib.py",
+        refs=[Reference(name="helper", kind="call", line=1)],
+    )
+
+    scores = simple_rank({"lib.py": lib, "caller.py": caller, "tests/test_lib.py": test_file})
+
+    assert scores["lib.py"] == 2.5  # 2 inbound refs + 0.5 * fully exported
+    assert scores["caller.py"] == 0.0
+    assert scores["tests/test_lib.py"] == -0.3
+
+
+def test_compute_ranks_dispatches_and_rejects_unknown_strategy():
+    files = {"a.py": _file("a.py")}
+
+    assert compute_ranks(files, strategy="simple") == simple_rank(files)
+
+    try:
+        compute_ranks(files, strategy="nonsense")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("expected ValueError for an unknown strategy")
+
+
+def test_pagerank_favours_the_file_everything_points_at():
+    core_sym = Symbol(name="core", kind="function", line=1, end_line=1, signature="def core()")
+    hub = _file("hub.py", defs=[core_sym])
+    a = _file("a.py", refs=[Reference(name="core", kind="call", line=1)])
+    b = _file("b.py", refs=[Reference(name="core", kind="call", line=1)])
+
+    scores = pagerank_rank({"hub.py": hub, "a.py": a, "b.py": b})
+
+    assert scores["hub.py"] > scores["a.py"]
+    assert scores["hub.py"] > scores["b.py"]
+
+
+def test_pagerank_personalize_biases_toward_focus_files():
+    a = _file("a.py")
+    b = _file("b.py")
+
+    scores = pagerank_rank({"a.py": a, "b.py": b}, personalize=["a.py"])
+
+    assert scores["a.py"] > scores["b.py"]
