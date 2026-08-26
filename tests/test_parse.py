@@ -145,11 +145,34 @@ def test_bundled_typescript_query_alone_finds_no_ordinary_declarations(language)
 
 
 @pytest.mark.parametrize(
-    ("language", "fixture"),
-    [("typescript", "sample_typescript.ts"), ("tsx", "sample_tsx.tsx")],
+    ("language", "fixture", "supplied_by_the_merge"),
+    [
+        (
+            "typescript",
+            "sample_typescript.ts",
+            # Class, method and function -- the three categories the bundled
+            # TypeScript query has no rule for. `Backend` is deliberately not
+            # here: it is `abstract class`, which the TS query does cover.
+            {"Config", "Client", "Session", "toObject", "buildClient", "normalise"},
+        ),
+        (
+            "tsx",
+            "sample_tsx.tsx",
+            # Same three categories. `Surface` is abstract, so it is excluded
+            # here for the same reason `Backend` is above.
+            {"Toolbar", "Button", "Panel", "Layout", "track", "classNames"},
+        ),
+    ],
 )
-def test_the_merge_is_what_finds_most_of_the_fixture(language, fixture):
-    """The same finding, measured on the real fixture rather than a snippet."""
+def test_the_merge_is_what_finds_most_of_the_fixture(language, fixture, supplied_by_the_merge):
+    """The same finding, measured on the real fixture rather than a snippet.
+
+    Named forms rather than a count. The previous assertion was
+    ``len(merged) >= 2 * len(unmerged)``, which a partial regression in the
+    merge could clear while silently dropping a whole category -- losing every
+    class but keeping the methods still doubles the tally. A test that cannot
+    fail the way it exists to catch is not a test.
+    """
     parser = get_parser(language)
     tree = parser.parse((FIXTURE_DIR / fixture).read_bytes())
 
@@ -164,9 +187,13 @@ def test_the_merge_is_what_finds_most_of_the_fixture(language, fixture):
     unmerged = names(get_tags_query(language))
     merged = names(tags_query_source(language))
 
-    assert merged - unmerged, "the JavaScript merge added nothing"
-    assert len(merged) >= 2 * len(unmerged), (
-        f"{language}: unmerged found {sorted(unmerged)}, merged found {sorted(merged)}"
+    missing = supplied_by_the_merge - merged
+    assert not missing, f"{language}: the merged query no longer finds {sorted(missing)}"
+
+    leaked = supplied_by_the_merge & unmerged
+    assert not leaked, (
+        f"{language}: the bundled query now finds {sorted(leaked)} on its own -- "
+        "upstream may have fixed this; re-check whether the merge is still needed"
     )
 
 
@@ -461,3 +488,186 @@ def test_loc_counts_lines_without_a_trailing_newline():
     assert parse_source(b"a = 1", language="python", path="a.py").loc == 1
     assert parse_source(b"a = 1\n", language="python", path="a.py").loc == 1
     assert parse_source(b"a = 1\nb = 2\n", language="python", path="a.py").loc == 2
+
+
+# --------------------------------------------------------------------------
+# Regressions found in review of PR #12
+#
+# Every one of these was a silent false positive or a broken contract that
+# 93 green tests did not catch, because no fixture contained the shape. They
+# are grouped here so the next person can see what the review bought.
+# --------------------------------------------------------------------------
+
+
+def _defs(source: str, language: str) -> dict[str, str]:
+    parsed = parse_source(source.encode(), language=language, path=f"probe.{language}")
+    assert parsed is not None
+    return {d.name: d.kind for d in parsed.defs}
+
+
+def _refs(source: str, language: str) -> set[tuple[str, str]]:
+    parsed = parse_source(source.encode(), language=language, path=f"probe.{language}")
+    assert parsed is not None
+    return {(r.name, r.kind) for r in parsed.refs}
+
+
+@pytest.mark.parametrize(
+    ("block", "local"),
+    [
+        ('if (typeof window !== "undefined") { const GUARDED = 1; }', "GUARDED"),
+        ("for (let i = 0; i < 3; i++) { const LOOPED = i; }", "LOOPED"),
+        ("while (true) { const SPUN = 2; }", "SPUN"),
+        ("try { const TRIED = 3; } catch (e) { const CAUGHT = 4; }", "TRIED"),
+        ("{ const BARE = 5; }", "BARE"),
+    ],
+)
+def test_block_scoped_bindings_are_not_module_constants(block, local):
+    """A block body is a `statement_block`, and so is a namespace body.
+
+    Accepting either meant a feature-detection guard or a loop temporary at
+    module scope was indexed as a top-level constant. `_inside_function_body`
+    does not catch these: an `if` at module scope has no function ancestor.
+    """
+    found = _defs(f"{block}\nconst REAL = 9;\n", "javascript")
+
+    assert "REAL" in found
+    assert local not in found
+
+
+def test_namespace_constants_are_still_module_constants():
+    """The other side of the same check -- the case it must not break."""
+    found = _defs(
+        "export namespace Internals {\n  export const SEED = 7;\n}\n",
+        "typescript",
+    )
+
+    assert found.get("Internals.SEED") == "constant"
+
+
+def test_object_keys_passed_into_a_call_are_not_symbols():
+    """`app.use({ onError })` is inside no function, so the old test passed it.
+
+    The keys would have been indexed unqualified -- bare `onError`, owned by
+    nothing -- because `_qualify` had no declarator to hang them off.
+    """
+    found = _defs(
+        "app.use({ onError: () => {} });\nconst handlers = { onOpen: () => {} };\n",
+        "javascript",
+    )
+
+    assert "onError" not in found
+    assert found.get("handlers.onOpen") == "function", "a named dispatch table still counts"
+
+
+def test_generator_function_expressions_are_functions_not_constants():
+    """The bundled rule covers arrow and function_expression, not this one.
+
+    So it fell through to the constant supplement and was labelled `constant`,
+    which is what every map output would then have shown.
+    """
+    found = _defs(
+        "const gen = function* () {};\n"
+        "const agen = async function* () {};\n"
+        "const arrow = () => {};\n",
+        "javascript",
+    )
+
+    assert found["gen"] == "function"
+    assert found["agen"] == "function"
+    assert found["arrow"] == "function"
+
+
+def test_re_exports_record_the_names_they_re_export():
+    """Re-exported bindings live in `export_clause`, not `import_clause`."""
+    refs = _refs('export { alpha, beta } from "./greek";\n', "javascript")
+
+    assert ("alpha", "import") in refs
+    assert ("beta", "import") in refs
+    assert ("./greek", "import") in refs
+
+
+def test_a_local_export_is_not_an_inbound_reference():
+    """`export { thing }` with no `from` defines nothing elsewhere.
+
+    Recording it as an import would make the file depend on itself, and would
+    put a reference in the graph pointing at this very file's own definition.
+    """
+    refs = _refs("function thing() {}\nexport { thing };\n", "javascript")
+
+    assert ("thing", "import") not in refs
+
+
+@pytest.mark.parametrize(
+    ("source", "original", "alias"),
+    [
+        ('import { Logger as Log } from "./logger";', "Logger", "Log"),
+        ('export { gamma as delta } from "./more";', "gamma", "delta"),
+    ],
+)
+def test_an_alias_records_the_original_name_only(source, original, alias):
+    """One bogus reference per aliased import, each matching nothing.
+
+    The specifier holds both identifiers as named children, so the recursive
+    walk emitted the alias too -- against the module's own stated contract.
+    """
+    refs = _refs(source + "\n", "javascript")
+
+    assert (original, "import") in refs
+    assert (alias, "import") not in refs
+
+
+def test_namespace_imports_contribute_only_their_module():
+    """`import * as NS` binds a local name that no other file defines."""
+    refs = _refs('import * as NS from "./ns";\n', "javascript")
+
+    assert ("./ns", "import") in refs
+    assert ("NS", "import") not in refs
+
+
+def test_export_default_declarations_are_indexed():
+    assert _defs("export default function App() { return 1; }\n", "javascript") == {
+        "App": "function"
+    }
+    assert _defs("export default class Widget {}\n", "javascript") == {"Widget": "class"}
+
+
+def test_anonymous_export_default_is_skipped_rather_than_crashing():
+    """No name field, so there is nothing to index -- and nothing to raise on."""
+    assert _defs("export default function () { return 1; }\n", "javascript") == {}
+
+
+def test_class_expressions_are_indexed_with_their_binding_name():
+    found = _defs("const Sequencer = class { next() {} };\n", "javascript")
+
+    assert found["Sequencer"] == "constant"
+    assert found["Sequencer.next"] == "method"
+
+
+def test_a_bug_in_extraction_is_loud_not_a_silent_skip(monkeypatch, caplog):
+    """A file that vanishes because of *our* bug must not look like bad syntax.
+
+    Both failure paths used to log at DEBUG and return None, so a real defect
+    in extraction was indistinguishable from "somebody committed a syntax
+    error" -- the silent under-population parse.py's own docstring warns about.
+    """
+    import waypost.parse as parse_module
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("simulated bug in extraction")
+
+    monkeypatch.setattr(parse_module, "_extract", boom)
+
+    with caplog.at_level(logging.WARNING):
+        result = parse_source(b"a = 1\n", language="python", path="a.py")
+
+    assert result is None
+    assert any(r.levelno >= logging.WARNING for r in caplog.records)
+    assert "omitted from the index" in caplog.text
+
+
+def test_a_syntax_error_stays_quiet():
+    """The other half of the split: a genuinely broken file is not a warning."""
+    parsed = parse_source(b"def broken(:\n    pass\n", language="python", path="b.py")
+
+    assert parsed is not None
+    assert parsed.truncated is True

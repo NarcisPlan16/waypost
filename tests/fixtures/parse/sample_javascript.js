@@ -116,4 +116,42 @@ const handlers = {
   },
 };
 
+// A feature-detection guard. `FALLBACK_TRANSPORT` is scoped to the block, not
+// to the module, and is nobody's navigation target.
+if (typeof globalThis.fetch === "undefined") {
+  const FALLBACK_TRANSPORT = "xhr";
+  registry.set("transport", FALLBACK_TRANSPORT);
+}
+
+for (const key of ["read", "write"]) {
+  const seeded = registry.get(key);
+  void seeded;
+}
+
+// An options object passed straight into a call. There is no declarator to
+// qualify these keys against, so indexing them would produce owner-less
+// symbols called `onError` and `onRetry`.
+register("logging", {
+  onError: () => Logger.warn("failed"),
+  onRetry: () => null,
+});
+
+const Sequencer = class {
+  next() {
+    return null;
+  }
+};
+
+const nextId = function* () {
+  let n = 0;
+  while (true) yield n++;
+};
+
+export { Transport as Wire, Frame } from "./protocol";
+export * from "./errors";
+
+export default function createRegistry() {
+  return new Map();
+}
+
 module.exports = { Config, Client, buildClient };

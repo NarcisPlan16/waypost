@@ -9,11 +9,16 @@
     "appear in the fixture source and must NOT be indexed. Without them, recall",
     "could be driven to 100% by emitting every identifier in the file.",
     "",
+    "Several entries exist because a reviewer found the parser emitting them:",
+    "block-scoped bindings inside a module-level `if`/`for`, keys of an object",
+    "literal passed straight into a call, and re-export aliases. Each of those",
+    "was a silent false positive, invisible because no fixture contained the",
+    "shape. Adding a shape here is how that stops being possible.",
+    "",
     "Update this file only when the fixture source changes, or when a deliberate",
     "decision about what counts as a symbol changes -- never to make a red test",
     "green."
   ],
-
   "sample_python.py": {
     "language": "python",
     "symbols": {
@@ -48,16 +53,21 @@
       "main": "function",
       "Registry": "class",
       "Registry.register": "function",
-      "Registry.resolve": "function"
+      "Registry.resolve": "function",
+      "_trace": "function",
+      "Envelope": "class",
+      "stream_pages": "function"
     },
     "excluded_by_design": {
       "Config.timeout": "class-level annotated attribute, not a module constant",
       "timeout": "same attribute, unqualified",
       "json": "an imported module is a reference, not a definition here",
-      "AnyValue": "an import alias is a reference, not a definition here"
+      "AnyValue": "an import alias is a reference, not a definition here",
+      "POSIX_ONLY": "bound inside a module-level `if`; block-scoped, not a module constant",
+      "Envelope.body": "dataclass field annotation, same class as Config.timeout",
+      "body": "same field, unqualified"
     }
   },
-
   "sample_typescript.ts": {
     "language": "typescript",
     "symbols": {
@@ -90,7 +100,9 @@
       "withDefaults": "function",
       "Internals": "module",
       "Internals.checksum": "function",
-      "Internals.SEED": "constant"
+      "Internals.SEED": "constant",
+      "Session": "class",
+      "Session.open": "method"
     },
     "excluded_by_design": {
       "Config.constructor": "the bundled JS query excludes constructors; a class already carries the reader there",
@@ -99,10 +111,12 @@
       "Client.log": "same",
       "Options.retries": "property signature, not a method",
       "Method.Get": "enum member; the enum itself is the symbol",
-      "Method.Post": "same"
+      "Method.Post": "same",
+      "NODE_ONLY": "bound inside a module-level `if` guard; block-scoped, not a module constant",
+      "Wire": "a re-export alias is bound nowhere else; the reference records `Codec`",
+      "Legacy": "`export * as Legacy` binds a local name only; the module string is the whole edge"
     }
   },
-
   "sample_javascript.js": {
     "language": "javascript",
     "symbols": {
@@ -135,16 +149,24 @@
       "register": "function",
       "resolve": "function",
       "handlers.onOpen": "function",
-      "handlers.onClose": "function"
+      "handlers.onClose": "function",
+      "Sequencer": "constant",
+      "Sequencer.next": "method",
+      "nextId": "function",
+      "createRegistry": "function"
     },
     "excluded_by_design": {
       "Config.constructor": "the bundled JS query excludes constructors",
       "Client.constructor": "same",
       "Pool.constructor": "same",
-      "Logger": "an imported binding is a reference, not a definition here"
+      "Logger": "an imported binding is a reference, not a definition here",
+      "FALLBACK_TRANSPORT": "bound inside a module-level `if` guard; block-scoped, not a module constant",
+      "seeded": "bound inside a module-level `for`; re-created every iteration",
+      "onError": "key of an object passed straight into a call -- no declarator to qualify it against",
+      "onRetry": "same",
+      "Wire": "a re-export alias is bound nowhere else; the reference records `Transport`"
     }
   },
-
   "sample_tsx.tsx": {
     "language": "tsx",
     "symbols": {
@@ -177,7 +199,9 @@
       "withDefaults": "function",
       "Internals": "module",
       "Internals.checksum": "function",
-      "Internals.SEED": "constant"
+      "Internals.SEED": "constant",
+      "Layout": "function",
+      "Layout.Header": "function"
     },
     "excluded_by_design": {
       "Toolbar.constructor": "the bundled JS query excludes constructors",

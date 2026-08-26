@@ -108,3 +108,16 @@ export namespace Internals {
 
   export const SEED = 7;
 }
+
+export function Layout(props: PanelProps): JSX.Element {
+  function Header(): JSX.Element {
+    return <h1 className={INTERNAL_CLASS}>{DEFAULT_LABEL}</h1>;
+  }
+
+  return (
+    <div>
+      <Header />
+      {props.render()}
+    </div>
+  );
+}

@@ -278,6 +278,18 @@ def tags_query_source(language: str) -> str:
 
 
 @cache
+def _interesting_types(language: str) -> frozenset[str]:
+    """Node types the supplementary pass can do anything with.
+
+    Everything else is skipped without a function call. Derived from the two
+    tables rather than written out, so adding a supplementary rule cannot
+    forget to widen the filter.
+    """
+    import_types = _PYTHON_IMPORT_TYPES if language == "python" else _JS_IMPORT_TYPES
+    return frozenset(_SUPPLEMENTARY_DEFS.get(language, {})) | import_types
+
+
+@cache
 def _compiled(language: str) -> tuple[Any, Query]:
     parser = get_parser(language)
     grammar = parser.language
@@ -345,8 +357,21 @@ def parse_source(source: bytes, *, language: str, path: str = "<memory>") -> Par
 
     try:
         defs, refs = _extract(root, source, language, query)
-    except Exception as exc:  # noqa: BLE001 -- same reason.
-        logger.debug("waypost: failed to extract symbols from %s: %s", path, exc)
+    except Exception:
+        # Deliberately louder than the parse failure above, and deliberately
+        # with a traceback. A file tree-sitter cannot parse is an expected,
+        # uninteresting event -- somebody committed broken syntax. An
+        # exception raised *by this module* while walking a tree that parsed
+        # fine is a bug in waypost, and at DEBUG it looked identical to the
+        # boring case: the file would vanish from the index behind a
+        # breadcrumb nobody has logging turned on for. That is the exact
+        # silent under-population this module's own docstring warns will not
+        # surface until the benchmark.
+        logger.warning(
+            "waypost: bug extracting symbols from %s; file omitted from the index",
+            path,
+            exc_info=True,
+        )
         return None
 
     return ParsedFile(
@@ -387,8 +412,27 @@ def _extract(
                     ref = Reference(name=text, kind=kind, line=name_node.start_point[0] + 1)
                     references[(ref.name, ref.kind, ref.line)] = ref
 
+    # The supplementary pass acts on a handful of node types but visits every
+    # named node, so the filtering has to happen before the function calls,
+    # not inside them. Measured over 672 real files (307k LOC, 1.36M named
+    # nodes): 2.17s -> 1.54s for this pass, 4.30s -> 3.73s overall.
+    #
+    # What is left is `_walk` itself -- building a Python wrapper for every
+    # node in the tree. It is still ~41% of parse time, more than twice the
+    # native query pass, and no amount of filtering fixes that because the
+    # traversal is the cost. Expressing these rules as real tree-sitter
+    # queries would move the traversal into C. That is a Sprint 2 decision
+    # against a Sprint 2 target, recorded here so it is made on a number:
+    # 700k LOC extrapolates to ~8.4s against a 15s budget that also has to
+    # cover walking, ranking and writing the index.
+    supplements = _SUPPLEMENTARY_DEFS.get(language, {})
+    interesting = _interesting_types(language)
+
     for node in _walk(root):
-        supplement = _SUPPLEMENTARY_DEFS.get(language, {}).get(node.type)
+        node_type = node.type
+        if node_type not in interesting:
+            continue
+        supplement = supplements.get(node_type)
         if supplement is not None:
             symbol = _supplementary_symbol(node, source, language, supplement)
             if symbol is not None:
@@ -409,12 +453,7 @@ def _build_symbol(
     kind: str,
     caps: dict[str, list[Node]],
 ) -> Symbol | None:
-    if node.type == "pair" and _inside_function_body(node):
-        # `const handlers = { onOpen: () => ... }` at module level is a
-        # dispatch table worth navigating to. The same shape passed as an
-        # argument inside a function body -- `withDefaults({ onClick: ... })`
-        # -- is an implementation detail, and indexing one line per callback
-        # is the sort of noise this tool exists to remove.
+    if node.type == "pair" and not _is_navigable_pair(node):
         return None
 
     name = _text(name_node, source)
@@ -441,6 +480,16 @@ def _supplementary_symbol(
     """Build a symbol for a form the tags query misses. See findings 6 and 7."""
     if kind == "constant" and not _is_module_level_constant(node, language):
         return None
+
+    if kind == "constant":
+        value = node.child_by_field_name("value")
+        if value is not None and value.type == "generator_function":
+            # `const gen = function* () {}` (and the async form, which is the
+            # same node type). The bundled query's variable_declarator rule
+            # covers `arrow_function` and `function_expression` but not this,
+            # so it arrives here as a fallback -- and calling a generator a
+            # constant is a lie that would render as one in every map output.
+            kind = "function"
 
     name_node = node.child_by_field_name("name") or node.child_by_field_name("left")
     if name_node is None or name_node.type not in {"identifier", "type_identifier"}:
@@ -488,11 +537,71 @@ def _is_module_level_constant(node: Node, language: str) -> bool:
         "export_statement",
     }:
         current = current.parent
-    if current is None or current.type not in {"program", "statement_block"}:
+    if current is None or not _is_module_scope_body(current):
         return False
     # An arrow/function value is already a @definition.function from the query.
     value = node.child_by_field_name("value")
     return value is None or value.type not in {"arrow_function", "function_expression"}
+
+
+def _is_module_scope_body(node: Node) -> bool:
+    """True for the file body or a namespace body, false for any other block.
+
+    `statement_block` is not specific enough to accept on its own. It is the
+    body of a namespace -- where `export const SEED = 1` really is a top-level
+    constant of `Internals` -- but it is equally the body of an `if`, `for`,
+    `while`, `try` or a bare block, where the binding is scoped to that block
+    and is nobody's navigation target::
+
+        if (typeof window !== "undefined") {
+            const GUARDED = 1;   // not a module constant
+        }
+
+    `_inside_function_body` does not catch these, because an `if` at module
+    scope has no function ancestor. Accepting any `statement_block` therefore
+    padded the index with block locals -- and because no fixture put a `const`
+    inside a bare `if` or `for`, the padding never showed up in a test.
+    """
+    if node.type == "program":
+        return True
+    return (
+        node.type == "statement_block"
+        and node.parent is not None
+        and node.parent.type == "internal_module"
+    )
+
+
+def _is_navigable_pair(node: Node) -> bool:
+    """True for a key in a named object literal, false for one in an argument.
+
+    `const handlers = { onOpen: () => ... }` at module level is a dispatch
+    table worth navigating to, and `handlers.onOpen` is a name that means
+    something. The same shape passed straight into a call --
+    `app.use({ onError: () => ... })` -- is an implementation detail, and
+    `_qualify` has no declarator to hang it off, so it would be indexed under
+    the bare key `onError`: a symbol with no owner, one line of noise per
+    callback in every map output.
+
+    The test has to be positive -- "is this object bound to a name?" -- rather
+    than "is this inside a function?". A config object passed to a top-level
+    call is inside no function at all, so the negative test let it through.
+    """
+    if _inside_function_body(node):
+        return False
+    current = node
+    while current.parent is not None:
+        parent = current.parent
+        if parent.type in {"object", "pair"}:
+            # Nested literal: keep climbing to whatever binds the outermost one.
+            current = parent
+            continue
+        if parent.type == "variable_declarator":
+            value = parent.child_by_field_name("value")
+            # Compare ids, not identity: the bindings hand out a fresh wrapper
+            # object on every access, so `is` is always False here.
+            return value is not None and value.id == current.id
+        return False
+    return False
 
 
 def _inside_function_body(node: Node) -> bool:
@@ -735,6 +844,15 @@ def _imports(node: Node, source: bytes, language: str) -> Iterator[Reference]:
         if child.type == "import_clause":
             for name in _import_names(child, source):
                 yield Reference(name=name, kind="import", line=line)
+        elif child.type == "export_clause" and source_node is not None:
+            # `export { alpha } from "./greek"` is a re-export: this file
+            # depends on `alpha` exactly as an import does, and the bindings
+            # live in `export_clause`, not `import_clause`. The `source_node`
+            # guard is what separates it from a plain `export { alpha }`,
+            # where `alpha` is defined *in this file* and recording it as an
+            # outbound reference would make the file depend on itself.
+            for name in _import_names(child, source):
+                yield Reference(name=name, kind="import", line=line)
 
 
 def _import_names(node: Node, source: bytes) -> Iterator[str]:
@@ -744,16 +862,27 @@ def _import_names(node: Node, source: bytes) -> Iterator[str]:
         if text:
             yield text
         return
-    if node.type == "aliased_import":
-        # `from typing import Any as AnyValue` records `Any`, not `AnyValue`.
-        # The reference graph matches references against definitions in other
+    if node.type in {"aliased_import", "import_specifier", "export_specifier"}:
+        # `from typing import Any as AnyValue` records `Any`, not `AnyValue`,
+        # and `import { Logger as Log }` records `Logger`, not `Log`. The
+        # reference graph matches references against definitions in other
         # files, and it is the original name that is defined somewhere; the
         # local alias is defined nowhere and would never match anything.
+        #
+        # The JS/TS specifiers hold both identifiers as named children, so
+        # recursing into them emitted the alias as well -- one bogus reference
+        # per aliased import, each guaranteed to match nothing. Read the
+        # `name` field instead of walking the children.
         target = node.child_by_field_name("name")
         if target is not None:
             yield from _import_names(target, source)
         return
     if node.type in {"wildcard_import", "string"}:
+        return
+    if node.type in {"namespace_import", "namespace_export"}:
+        # `import * as NS from "./ns"` binds `NS` locally and nothing else;
+        # there is no original name to match against, so the module string
+        # already emitted is the whole of the dependency edge.
         return
     for child in node.named_children:
         yield from _import_names(child, source)

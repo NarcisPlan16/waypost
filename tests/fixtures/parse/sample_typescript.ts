@@ -109,3 +109,16 @@ export namespace Internals {
 
   export const SEED = 7;
 }
+
+export { Codec as Wire, Frame } from "./protocol";
+export * from "./errors";
+export * as Legacy from "./legacy";
+
+if (typeof process !== "undefined") {
+  const NODE_ONLY = true;
+  void NODE_ONLY;
+}
+
+export default class Session {
+  open(): void {}
+}

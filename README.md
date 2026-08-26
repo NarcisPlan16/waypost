@@ -15,18 +15,23 @@ Per definition: a qualified name (`Client.Pool.acquire`), a kind, a line span,
 a one-line signature with the body cut off, a one-line doc summary, and
 whether it is exported. Per file: outbound references — calls, type mentions,
 and **imports**, which no bundled tags query covers and which carry most of
-the signal about which file depends on which.
+the signal about which file depends on which. An import or re-export records
+the name the *other* file defines, never the local alias: `import { Logger as
+Log }` contributes `Logger`, because `Log` is bound nowhere else and would
+match nothing in the graph.
 
 Not extracted, on purpose: constructors (reachable through their class),
-class fields and property signatures, enum members, and object-literal
-callbacks passed inside a function body. Each one costs a line in every map
-output and leads nowhere. `tests/fixtures/parse/expected.json` lists them
-per fixture with the reason, and a test asserts they stay out.
+class fields and property signatures, enum members, bindings scoped to a
+block rather than to the module (`if (…) { const FALLBACK = … }`), and the
+keys of an object literal passed straight into a call. Each one costs a line
+in every map output and leads nowhere.
+`tests/fixtures/parse/expected.json` lists them per fixture with the reason,
+and a test asserts they stay out.
 
 Symbol recall is measured, not asserted: `tests/test_parse.py` computes it
-against a hand-written inventory of four ~30-symbol fixtures and fails below
-95%. Extraction is not a straight pass-through of tree-sitter's bundled tags
-queries — three of their rules are dead against current grammars, and
+against a hand-written inventory of four 30-plus-symbol fixtures and fails
+below 95%. Extraction is not a straight pass-through of tree-sitter's bundled
+tags queries — three of their rules are dead against current grammars, and
 `parse.py`'s module docstring records which, how that was measured, and what
 this module does instead.
 

@@ -132,3 +132,29 @@ class Registry:
     def resolve(self, name: str):
         """Look a name up, or raise KeyError."""
         raise KeyError(name)
+
+
+def _trace(fn):
+    """Decorator: mark a callable as traced."""
+    return fn
+
+
+@_trace
+@dataclass
+class Envelope:
+    """A request envelope. Two stacked decorators, on purpose."""
+
+    body: str
+
+
+@_trace
+async def stream_pages(urls: list[str]):
+    """Async generator: yield each normalised URL as it is produced."""
+    for url in urls:
+        yield _normalise(url)
+
+
+if os.path.sep == "/":
+    # Block-scoped even at module level. Python's own rule already excludes
+    # this (the parent is an `if`, not the module), and the fixture pins it.
+    POSIX_ONLY = True
