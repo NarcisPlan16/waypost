@@ -6,11 +6,13 @@
     "waypost": "bin/waypost.js"
   },
   "files": [
-    "bin/waypost.js"
+    "bin/waypost.js",
+    "SKILL.md"
   ],
   "engines": {
     "node": ">=16"
   },
+  "author": "Narcis",
   "license": "MIT",
   "repository": {
     "type": "git",

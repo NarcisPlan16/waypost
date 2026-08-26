@@ -81,21 +81,32 @@ through a CLI, an npm wrapper, and a Claude Skill.
 uv sync --extra dev
 ```
 
-Once published, `npx waypost <command>` will work on a clean machine with no
-prior setup: `bin/waypost.js` is a thin resolver, not a bundled runtime — it
-execs whichever of `waypost` (already on PATH), `uvx waypost`, `pipx run
-waypost`, or `python3 -m waypost` / `python -m waypost` it finds first, and
-exits `2` with an install hint if none resolve. It makes no LLM calls and
-adds no logic beyond that resolution; the indexer it hands off to is exactly
-the one described in this README.
+Once published, `npx waypost <command>` saves the separate `pip install` on
+any machine that already has `uv`, `pipx`, or a Python holding `waypost` —
+which is not the same as needing nothing at all. `bin/waypost.js` is a thin
+resolver, not a bundled runtime: it tries `waypost` (already on PATH), `uvx
+waypost`, `pipx run waypost`, then `python3 -m waypost` / `python -m
+waypost`, probes each with `--version`, and uses the first one that actually
+answers. A launcher that exists but cannot run waypost — the Microsoft Store
+`python3` alias is the common one — is skipped rather than allowed to
+swallow the command. If none answer it exits `2` and names what it tried. It
+makes no LLM calls and adds no logic beyond that resolution; the indexer it
+hands off to is exactly the one described in this README.
 
 ## Claude Skill
 
 `SKILL.md` at the repo root tells an agent when to reach for `waypost`
 (getting oriented, finding a symbol, reading one function, tracing refs,
 outlining a file) and when not to (small repos, non-Python/JS/TS files,
-edits that need the real file content). Point a Claude Code / Claude Skill
-setup at this repo to pick it up.
+edits that need the real file content). It is shipped in the npm package
+too, so `node_modules/waypost/SKILL.md` is a copy source as well.
+
+Claude Code discovers skills by directory, so install it as one:
+
+```bash
+mkdir -p ~/.claude/skills/waypost          # or .claude/skills/waypost, per project
+cp SKILL.md ~/.claude/skills/waypost/SKILL.md
+```
 
 ## Usage
 

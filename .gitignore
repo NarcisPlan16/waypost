@@ -6,6 +6,7 @@ build/
 dist/
 .venv/
 venv/
+node_modules/
 .pytest_cache/
 .waypost/
 .DS_Store
