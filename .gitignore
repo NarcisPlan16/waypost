@@ -15,3 +15,5 @@ node_modules/
 waypost v0.1 Build Plan.html
 waypost v0.1 Build Plan_files/
 Concept.md
+bench/.cache/
+bench/results/

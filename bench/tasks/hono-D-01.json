@@ -1,0 +1,10 @@
+{
+  "id": "hono-D-01",
+  "repo": "hono",
+  "category": "D",
+  "prompt": "Explain how Hono chooses which router implementation to use for an application, and how a registered route ends up matched against an incoming request. Name the files involved at each step. Do not change any code.",
+  "grade": {
+    "kind": "judge",
+    "rubric": "The explanation should cover the smart router's trial of candidate routers, the routers under src/router, and how a match reaches the composed middleware chain."
+  }
+}

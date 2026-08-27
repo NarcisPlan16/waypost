@@ -1,0 +1,25 @@
+{
+  "id": "flask-C-01",
+  "repo": "flask",
+  "category": "C",
+  "prompt": "Bug report: Config.get_namespace() returns the wrong keys when trim_namespace is true. Given a config key 'IMAGE_STORE_TYPE' and namespace 'IMAGE_STORE_', the returned key is 'ype' instead of 'type' -- the first character of every key is being eaten. Find the cause and fix it.",
+  "setup": [
+    {
+      "path": "src/flask/config.py",
+      "find": "key = k[len(namespace) :]",
+      "replace": "key = k[len(namespace) + 1 :]"
+    }
+  ],
+  "grade": {
+    "kind": "diff",
+    "expect_files": [
+      "src/flask/config.py"
+    ],
+    "expect_contains": [
+      "key = k[len(namespace) :]"
+    ],
+    "expect_absent": [
+      "key = k[len(namespace) + 1 :]"
+    ]
+  }
+}

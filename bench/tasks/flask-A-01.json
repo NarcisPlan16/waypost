@@ -1,0 +1,12 @@
+{
+  "id": "flask-A-01",
+  "repo": "flask",
+  "category": "A",
+  "prompt": "In this Flask repository, find the class that holds the temporary state passed to a blueprint's deferred registration callbacks -- the object handed to functions that were recorded on a blueprint before it was registered on an application. Report which file defines it. Do not change any code.",
+  "grade": {
+    "kind": "localization",
+    "expect_files": [
+      "src/flask/sansio/blueprints.py"
+    ]
+  }
+}
