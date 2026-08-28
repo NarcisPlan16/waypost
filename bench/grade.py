@@ -100,6 +100,23 @@ def _git_diff(worktree: Path, *args: str) -> str:
     return completed.stdout
 
 
+def _added_lines(diff_text: str) -> str:
+    """Only the lines the run *added*, with their ``+`` markers stripped.
+
+    Matching fragments against the whole diff looks equivalent and is not.
+    A category C task injects a bug and asks for it to be removed, so the
+    buggy text is exactly what appears on the ``-`` lines of a **correct**
+    fix -- and an ``expect_absent`` fragment naming it would then fail every
+    correct run. The question both assertions are really asking is what the
+    fixed code says, and that is the added lines.
+    """
+    return "\n".join(
+        line[1:]
+        for line in diff_text.splitlines()
+        if line.startswith("+") and not line.startswith("+++")
+    )
+
+
 def _grade_diff(task: Task, worktree: Path) -> Verdict:
     changed = {_normalise(line) for line in _git_diff(worktree, "--name-only").splitlines() if line}
     expected = {_normalise(path) for path in task.grade["expect_files"]}
@@ -107,13 +124,13 @@ def _grade_diff(task: Task, worktree: Path) -> Verdict:
     if missing:
         return Verdict(False, f"expected edits to {missing}; changed {sorted(changed)}")
 
-    diff_text = _git_diff(worktree)
+    added = _added_lines(_git_diff(worktree))
     for fragment in task.grade.get("expect_contains", []):
-        if fragment not in diff_text:
-            return Verdict(False, f"diff does not contain {fragment!r}")
+        if fragment not in added:
+            return Verdict(False, f"no added line contains {fragment!r}")
     for fragment in task.grade.get("expect_absent", []):
-        if fragment in diff_text:
-            return Verdict(False, f"diff still contains {fragment!r}")
+        if fragment in added:
+            return Verdict(False, f"an added line still contains {fragment!r}")
     return Verdict(True, f"edited {sorted(expected)} as expected")
 
 

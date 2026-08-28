@@ -1,0 +1,11 @@
+{
+  "id": "hono-B-01",
+  "repo": "hono",
+  "category": "B",
+  "prompt": "Hono exposes a route-registration shorthand for each supported HTTP method (get, post, put, delete, options, patch). Add the HEAD method the same way: include it in the shared list of supported methods, and declare the matching typed property on the application base class next to the existing per-method ones. Follow the existing pattern exactly; do not add a new file.",
+  "grade": {
+    "kind": "diff",
+    "expect_files": ["src/router.ts", "src/hono-base.ts"],
+    "expect_contains": ["'head'"]
+  }
+}

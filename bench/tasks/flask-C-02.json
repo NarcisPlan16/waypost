@@ -1,0 +1,19 @@
+{
+  "id": "flask-C-02",
+  "repo": "flask",
+  "category": "C",
+  "prompt": "Bug report: nested blueprint names are resolved wrongly. Splitting the blueprint path 'admin.users.detail' should yield every ancestor -- 'admin.users.detail', 'admin.users', 'admin' -- but instead it yields 'admin.users.detail' and 'detail'. Only the last segment comes back rather than the parent path, so nested blueprint lookups fail. Find the cause and fix it.",
+  "setup": [
+    {
+      "path": "src/flask/helpers.py",
+      "find": "rpartition(\".\")[0]",
+      "replace": "rpartition(\".\")[2]"
+    }
+  ],
+  "grade": {
+    "kind": "diff",
+    "expect_files": ["src/flask/helpers.py"],
+    "expect_contains": ["rpartition(\".\")[0]"],
+    "expect_absent": ["rpartition(\".\")[2]"]
+  }
+}

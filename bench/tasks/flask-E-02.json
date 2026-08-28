@@ -1,0 +1,10 @@
+{
+  "id": "flask-E-02",
+  "repo": "flask",
+  "category": "E",
+  "prompt": "In src/flask/json/provider.py, explain which extra Python types the default JSON provider knows how to serialize beyond what the standard library handles, what each is converted to, and what happens for a type it does not recognise. Name the file you looked at in your answer. Do not change any code.",
+  "grade": {
+    "kind": "localization",
+    "expect_files": ["src/flask/json/provider.py"]
+  }
+}

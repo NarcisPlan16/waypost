@@ -8,11 +8,19 @@ import sys
 from pathlib import Path
 
 from bench.client import build_client
+from bench.context import (
+    DEFAULT_MAP_BUDGET,
+    DEFAULT_SHOW_BUDGET,
+    build_probe,
+    render_comparison,
+    render_probe,
+)
 from bench.loop import DEFAULT_EFFORT, DEFAULT_MODEL
 from bench.report import build_report, load_records, render_text
 from bench.runner import Runner, build_matrix, execute_batch, rough_cost
 from bench.tasks import TaskError, load_tasks
-from bench.worktree import load_repos
+from bench.worktree import RepoSpec, build_index, load_repos, run_worktree
+from waypost import index as index_mod
 
 EXIT_OK = 0
 EXIT_ABORTED = 1
@@ -21,6 +29,7 @@ EXIT_ERROR = 2
 DEFAULT_TASKS_DIR = Path(__file__).resolve().parent / "tasks"
 DEFAULT_RESULTS_DIR = Path(__file__).resolve().parent / "results"
 DEFAULT_CACHE_DIR = Path(__file__).resolve().parent / ".cache"
+DEFAULT_PROBE_REPOS = Path(__file__).resolve().parent / "probe-repos.json"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -57,6 +66,27 @@ def build_parser() -> argparse.ArgumentParser:
     p_tasks.add_argument("--tasks", type=Path, default=DEFAULT_TASKS_DIR, help="task directory")
     p_tasks.add_argument("--repo", default=None, help="only list tasks for this repo")
     p_tasks.set_defaults(handler=_cmd_tasks)
+
+    p_context = sub.add_parser(
+        "context",
+        help="token cost of `show`/`map` against reading files -- calls no model, spends nothing",
+    )
+    src = p_context.add_mutually_exclusive_group(required=True)
+    src.add_argument("--repo", default=None, help="a repo from the probe table")
+    src.add_argument("--root", type=Path, default=None, help="any local checkout instead")
+    src.add_argument("--all", action="store_true", help="every repo in the table, side by side")
+    p_context.add_argument(
+        "--repos",
+        type=Path,
+        default=DEFAULT_PROBE_REPOS,
+        help="probe repository table (defaults to bench/probe-repos.json)",
+    )
+    p_context.add_argument("--cache-dir", type=Path, default=DEFAULT_CACHE_DIR, help="clone cache")
+    p_context.add_argument("--work-dir", type=Path, default=None, help="where worktrees go")
+    p_context.add_argument("--map-budget", type=int, default=DEFAULT_MAP_BUDGET)
+    p_context.add_argument("--show-budget", type=int, default=DEFAULT_SHOW_BUDGET)
+    p_context.add_argument("--json", action="store_true", help="emit the probe as JSON")
+    p_context.set_defaults(handler=_cmd_context)
 
     return parser
 
@@ -105,6 +135,50 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
     written = execute_batch(runner, matrix, resume=args.resume)
     print(f"\n{written} run(s) written to {results_path}")
+    return EXIT_OK
+
+
+def _probe_pinned(args: argparse.Namespace, spec: RepoSpec) -> dict:
+    work_dir = args.work_dir or DEFAULT_CACHE_DIR / "probe"
+    # The same pinned, freshly indexed worktree the paid runs use, so the
+    # probe describes the tree the benchmark would measure.
+    with run_worktree(spec, args.cache_dir, work_dir) as root:
+        return build_probe(
+            root, map_budget=args.map_budget, show_budget=args.show_budget, label=spec.name
+        )
+
+
+def _cmd_context(args: argparse.Namespace) -> int:
+    reports: list[dict]
+    if args.root is not None:
+        root = args.root.resolve()
+        if index_mod.load(index_mod.default_index_path(root)) is None:
+            build_index(root)
+        reports = [
+            build_probe(
+                root, map_budget=args.map_budget, show_budget=args.show_budget, label=root.name
+            )
+        ]
+    elif args.all:
+        repos = load_repos(args.repos)
+        reports = []
+        for name, spec in repos.items():
+            print(f"probing {name} ...", file=sys.stderr)
+            reports.append(_probe_pinned(args, spec))
+    else:
+        repos = load_repos(args.repos)
+        chosen = repos.get(args.repo)
+        if chosen is None:
+            print(f"bench: unknown repo {args.repo!r}", file=sys.stderr)
+            return EXIT_ERROR
+        reports = [_probe_pinned(args, chosen)]
+
+    if args.json:
+        print(json.dumps(reports if args.all else reports[0], indent=2, sort_keys=True))
+    elif len(reports) > 1:
+        print(render_comparison(reports))
+    else:
+        print(render_probe(reports[0]))
     return EXIT_OK
 
 

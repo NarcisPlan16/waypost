@@ -1,0 +1,10 @@
+{
+  "id": "hono-E-02",
+  "repo": "hono",
+  "category": "E",
+  "prompt": "In src/middleware/body-limit/index.ts, explain how the middleware decides that a request body is too large, what it does when no custom error handler is supplied, and how a caller can override that behaviour. Name the file you looked at in your answer. Do not change any code.",
+  "grade": {
+    "kind": "localization",
+    "expect_files": ["src/middleware/body-limit/index.ts"]
+  }
+}

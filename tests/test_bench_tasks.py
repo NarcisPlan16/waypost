@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -87,11 +88,15 @@ def test_load_tasks_errors_on_an_empty_directory(tmp_path):
         load_tasks(tmp_path)
 
 
-def test_the_shipped_seed_suite_is_valid_and_covers_the_categories():
+def test_the_shipped_suite_is_valid_and_balanced_across_repos_and_categories():
     tasks = load_tasks(Path("bench/tasks"))
-    assert len(tasks) == 8
+    # The roadmap's matrix: 20 tasks, 2 repos x 5 categories x 2 each. The
+    # balance is the assertion that matters -- per-category reductions are
+    # only comparable if every cell is the same size, and the control cell
+    # has to be as well stocked as the rest to detect a biased harness.
+    assert len(tasks) == 20
     assert {t.repo for t in tasks} == {"flask", "hono"}
-    # Every category present in the seeds is a real one, and the control is
-    # there: without E there is nothing to detect a biased harness with.
-    assert {t.category for t in tasks} <= set(CATEGORIES)
-    assert "E" in {t.category for t in tasks}
+    assert {t.category for t in tasks} == set(CATEGORIES)
+
+    cells = Counter((t.repo, t.category) for t in tasks)
+    assert set(cells.values()) == {2}, cells

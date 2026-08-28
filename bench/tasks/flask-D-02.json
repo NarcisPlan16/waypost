@@ -1,0 +1,10 @@
+{
+  "id": "flask-D-02",
+  "repo": "flask",
+  "category": "D",
+  "prompt": "Explain how a Flask application's configuration is assembled: where the built-in defaults come from, what object holds them, and which mechanisms can override them afterwards. Name the files involved at each step. Do not change any code.",
+  "grade": {
+    "kind": "judge",
+    "rubric": "The explanation should identify the Config mapping and the default_config defaults, say where the defaults are declared, and cover the from_object / from_pyfile / from_envvar / from_prefixed_env override paths, naming the files that implement each."
+  }
+}

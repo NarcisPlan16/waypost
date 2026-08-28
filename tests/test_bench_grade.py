@@ -103,6 +103,35 @@ def test_injected_setup_is_committed_so_a_correct_fix_shows_up_as_a_diff(repo):
     assert grade(task, finished(), repo).success is True
 
 
+def test_expect_absent_ignores_the_removed_line_it_is_naming(repo):
+    # The bug this guards, which every category C task tripped: the injected
+    # text is what a *correct* fix deletes, so it appears on the diff's `-`
+    # line. Matching against the whole diff graded every correct fix a
+    # failure, and category C would have read as 0% success in both arms.
+    apply_setup(repo, [{"path": "src/config.py", "find": "KEY = 1", "replace": "KEY = 999"}])
+    task = make_task(
+        category="C",
+        grade={
+            "kind": "diff",
+            "expect_files": ["src/config.py"],
+            "expect_contains": ["KEY = 1"],
+            "expect_absent": ["KEY = 999"],
+        },
+    )
+    (repo / "src" / "config.py").write_text("KEY = 1\n", encoding="utf-8")
+    assert grade(task, finished(), repo).success is True
+
+
+def test_expect_contains_is_not_satisfied_by_a_removed_line(repo):
+    # The mirror image: deleting a line that happens to contain the fragment
+    # is not the same as writing it, and must not pass.
+    task = make_task(
+        grade={"kind": "diff", "expect_files": ["src/config.py"], "expect_contains": ["KEY = 1"]},
+    )
+    (repo / "src" / "config.py").write_text("OTHER = 2\n", encoding="utf-8")
+    assert grade(task, finished(), repo).success is False
+
+
 def test_setup_refuses_an_ambiguous_or_stale_match(repo):
     with pytest.raises(RuntimeError, match="found 0"):
         apply_setup(repo, [{"path": "src/config.py", "find": "MOVED", "replace": "x"}])

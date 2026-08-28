@@ -1,0 +1,30 @@
+{
+  "flask": {
+    "url": "https://github.com/pallets/flask",
+    "sha": "22d924701a6ae2e4cd01e9a15bbaf3946094af65"
+  },
+  "requests": {
+    "url": "https://github.com/psf/requests",
+    "sha": "5460f467b02e49471c0fd6cfc9ca0adab6351f98"
+  },
+  "rich": {
+    "url": "https://github.com/Textualize/rich",
+    "sha": "9d8f9a372cc5916fd4781fec207ced7ddac2f08f"
+  },
+  "django": {
+    "url": "https://github.com/django/django",
+    "sha": "3b767c5f6ab6a4421ea3892ac6afacd8aa1345d6"
+  },
+  "hono": {
+    "url": "https://github.com/honojs/hono",
+    "sha": "16eb88269ffb0ae68590ad55ac9ac58807850f26"
+  },
+  "express": {
+    "url": "https://github.com/expressjs/express",
+    "sha": "023767fe9872e029271df1418f73401bff20ff40"
+  },
+  "zod": {
+    "url": "https://github.com/colinhacks/zod",
+    "sha": "773a48676ede1a2144d4f2e60892e6c0cd6625a7"
+  }
+}

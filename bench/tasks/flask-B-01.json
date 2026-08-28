@@ -1,0 +1,11 @@
+{
+  "id": "flask-B-01",
+  "repo": "flask",
+  "category": "B",
+  "prompt": "Flask already supports a SESSION_COOKIE_PARTITIONED config option. Add an analogous SESSION_COOKIE_PRIORITY option, defaulting to None, following exactly the same pattern: register the default alongside the other SESSION_COOKIE_* defaults, add a get_cookie_priority accessor on SessionInterface next to get_cookie_partitioned, and read it in SecureCookieSessionInterface.save_session where the other cookie attributes are read.",
+  "grade": {
+    "kind": "diff",
+    "expect_files": ["src/flask/app.py", "src/flask/sessions.py"],
+    "expect_contains": ["SESSION_COOKIE_PRIORITY", "get_cookie_priority"]
+  }
+}
