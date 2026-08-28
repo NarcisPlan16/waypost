@@ -100,3 +100,52 @@ def test_the_shipped_suite_is_valid_and_balanced_across_repos_and_categories():
 
     cells = Counter((t.repo, t.category) for t in tasks)
     assert set(cells.values()) == {2}, cells
+
+
+def test_load_tasks_filters_by_category(tmp_path):
+    write(tmp_path, "a", VALID)
+    write(
+        tmp_path,
+        "d",
+        {
+            **VALID,
+            "id": "demo-D-01",
+            "category": "D",
+            "grade": {"kind": "rubric", "expect_all": [["x"]]},
+        },
+    )
+    assert [t.id for t in load_tasks(tmp_path, categories=["D"])] == ["demo-D-01"]
+    # Lowercase is what a hurried command line actually types.
+    assert [t.id for t in load_tasks(tmp_path, categories=["d"])] == ["demo-D-01"]
+    assert len(load_tasks(tmp_path, categories=["A", "D"])) == 2
+
+    with pytest.raises(TaskError, match="unknown categor"):
+        load_tasks(tmp_path, categories=["Z"])
+    with pytest.raises(TaskError, match="no tasks in categor"):
+        load_tasks(tmp_path, categories=["B"])
+
+
+def test_load_tasks_filters_by_id(tmp_path):
+    write(tmp_path, "a", VALID)
+    write(tmp_path, "b", {**VALID, "id": "demo-A-02"})
+    assert [t.id for t in load_tasks(tmp_path, ids=["demo-A-02"])] == ["demo-A-02"]
+
+    # A mistyped id must not silently run a different, more expensive batch.
+    with pytest.raises(TaskError, match="no such task id"):
+        load_tasks(tmp_path, ids=["demo-A-99"])
+
+
+def test_load_tasks_filters_compose(tmp_path):
+    write(tmp_path, "a", VALID)
+    write(tmp_path, "b", {**VALID, "id": "other-A-01", "repo": "other"})
+    with pytest.raises(TaskError, match="no such task id"):
+        load_tasks(tmp_path, repo="demo", ids=["other-A-01"])
+
+
+def test_bench_tasks_cli_accepts_the_filters(capsys):
+    from bench.cli import main
+
+    assert main(["tasks", "--repo", "flask", "--category", "D"]) == 0
+    out = capsys.readouterr().out
+    assert "flask-D-01" in out and "flask-A-01" not in out
+    assert "2 task(s)" in out

@@ -9,6 +9,7 @@ are checked here rather than at grading time.
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -163,11 +164,22 @@ def load_task(path: Path) -> Task:
     return parse_task(data, source=path)
 
 
-def load_tasks(directory: Path, repo: str | None = None) -> list[Task]:
+def load_tasks(
+    directory: Path,
+    repo: str | None = None,
+    categories: Sequence[str] | None = None,
+    ids: Sequence[str] | None = None,
+) -> list[Task]:
     """Load every ``*.json`` task under *directory*, sorted by id.
 
     Sorted so the run matrix is deterministic before the seeded shuffle; the
     shuffle is what randomises order, not filesystem iteration order.
+
+    *repo*, *categories* and *ids* narrow the suite and compose with AND. They
+    exist so a paid batch can be cut below one whole repository -- the smallest
+    unfiltered slice is ten tasks in two arms, which is more than a smoke test
+    should cost. A filter that selects nothing is an error rather than an empty
+    batch: a mistyped id must not quietly run something else, or nothing.
     """
     paths = sorted(directory.glob("*.json"))
     if not paths:
@@ -185,5 +197,20 @@ def load_tasks(directory: Path, repo: str | None = None) -> list[Task]:
         tasks = [task for task in tasks if task.repo == repo]
         if not tasks:
             raise TaskError(f"no tasks for repo {repo!r} in {directory}")
+
+    if categories:
+        wanted = {category.upper() for category in categories}
+        unknown_categories = sorted(wanted - set(CATEGORIES))
+        _require(not unknown_categories, f"unknown categor(ies) {unknown_categories}")
+        tasks = [task for task in tasks if task.category in wanted]
+        if not tasks:
+            raise TaskError(f"no tasks in categor(ies) {sorted(wanted)} after the other filters")
+
+    if ids:
+        wanted_ids = set(ids)
+        missing_ids = sorted(wanted_ids - {task.id for task in tasks})
+        if missing_ids:
+            raise TaskError(f"no such task id(s) {missing_ids} after the other filters")
+        tasks = [task for task in tasks if task.id in wanted_ids]
 
     return sorted(tasks, key=lambda t: t.id)

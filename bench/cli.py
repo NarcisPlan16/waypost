@@ -40,6 +40,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--tasks", type=Path, default=DEFAULT_TASKS_DIR, help="task directory")
     p_run.add_argument("--repos", type=Path, default=None, help="pinned repository table")
     p_run.add_argument("--repo", default=None, help="only run tasks for this repo")
+    p_run.add_argument(
+        "--category",
+        action="append",
+        default=None,
+        metavar="A-E",
+        help="only run this category; repeatable",
+    )
+    p_run.add_argument(
+        "--task",
+        action="append",
+        default=None,
+        metavar="ID",
+        help="only run this task id; repeatable",
+    )
     p_run.add_argument("--trials", type=int, default=1, help="trials per task per arm")
     p_run.add_argument("--seed", type=int, default=1, help="seed for the task order")
     p_run.add_argument("--model", default=DEFAULT_MODEL, help="model under test")
@@ -65,6 +79,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_tasks = sub.add_parser("tasks", help="validate and list the task suite")
     p_tasks.add_argument("--tasks", type=Path, default=DEFAULT_TASKS_DIR, help="task directory")
     p_tasks.add_argument("--repo", default=None, help="only list tasks for this repo")
+    p_tasks.add_argument(
+        "--category",
+        action="append",
+        default=None,
+        metavar="A-E",
+        help="only list this category; repeatable",
+    )
+    p_tasks.add_argument(
+        "--task",
+        action="append",
+        default=None,
+        metavar="ID",
+        help="only list this task id; repeatable",
+    )
     p_tasks.set_defaults(handler=_cmd_tasks)
 
     p_context = sub.add_parser(
@@ -92,7 +120,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _cmd_tasks(args: argparse.Namespace) -> int:
-    tasks = load_tasks(args.tasks, args.repo)
+    tasks = load_tasks(args.tasks, args.repo, args.category, args.task)
     for task in tasks:
         print(f"{task.id:<24}{task.repo:<12}{task.category:<4}{task.grade_kind}")
     print(f"\n{len(tasks)} task(s), all valid")
@@ -100,7 +128,7 @@ def _cmd_tasks(args: argparse.Namespace) -> int:
 
 
 def _cmd_run(args: argparse.Namespace) -> int:
-    tasks = load_tasks(args.tasks, args.repo)
+    tasks = load_tasks(args.tasks, args.repo, args.category, args.task)
     repos = load_repos(args.repos)
 
     unknown = sorted({task.repo for task in tasks} - set(repos))
@@ -109,7 +137,13 @@ def _cmd_run(args: argparse.Namespace) -> int:
         return EXIT_ERROR
 
     matrix = build_matrix(tasks, args.trials, args.seed)
-    results_path = args.out or DEFAULT_RESULTS_DIR / f"{args.model}-seed{args.seed}.jsonl"
+    # A filtered batch gets its own default file. Sharing the unfiltered name
+    # would let `bench report` average a two-task smoke together with a full
+    # matrix and call the mixture a result.
+    stem = f"{args.model}-seed{args.seed}"
+    if args.repo or args.category or args.task:
+        stem += "-partial"
+    results_path = args.out or DEFAULT_RESULTS_DIR / f"{stem}.jsonl"
 
     if not args.dry_run:
         estimate = rough_cost(args.model, len(matrix))
