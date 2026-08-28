@@ -1,0 +1,11 @@
+{
+  "id": "flask-B-02",
+  "repo": "flask",
+  "category": "B",
+  "prompt": "Add a new Flask signal named request_dispatching, declared in the module that defines the other built-in signals and using the same naming convention as them. Send it in full_dispatch_request immediately before the view function is dispatched, passing the same _async_wrapper argument the neighbouring signal sends use. Import it where it is sent, the way the other signals are imported.",
+  "grade": {
+    "kind": "diff",
+    "expect_files": ["src/flask/signals.py", "src/flask/app.py"],
+    "expect_contains": ["request_dispatching"]
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "id": "hono-C-02",
+  "repo": "hono",
+  "category": "C",
+  "prompt": "Bug report: static files are served with the wrong Content-Type charset. A .html file now comes back as 'text/html' with no '; charset=utf-8' suffix, and so does .css and .csv; only .txt still gets the charset appended. Every textual MIME type is supposed to get it. Find the cause and fix it.",
+  "setup": [
+    {
+      "path": "src/utils/mime.ts",
+      "find": "mimeType.startsWith('text')",
+      "replace": "mimeType.startsWith('text/plain')"
+    }
+  ],
+  "grade": {
+    "kind": "diff",
+    "expect_files": ["src/utils/mime.ts"],
+    "expect_contains": ["mimeType.startsWith('text')"],
+    "expect_absent": ["mimeType.startsWith('text/plain')"]
+  }
+}

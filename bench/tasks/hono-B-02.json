@@ -1,0 +1,10 @@
+{
+  "id": "hono-B-02",
+  "repo": "hono",
+  "category": "B",
+  "prompt": "Hono's MIME lookup appends a charset parameter to text types, producing values like 'text/xml; charset=utf-8'. The reverse lookup that turns a MIME type back into a file extension compares the whole string, so a parameterised type never matches and callers silently fall back to a default extension. Fix both halves: make the MIME-to-extension helper ignore anything from the first ';' onwards before matching, and make the static-site generator's extension-map lookup do the same before consulting its map. Do not add a new file.",
+  "grade": {
+    "kind": "diff",
+    "expect_files": ["src/utils/mime.ts", "src/helper/ssg/ssg.ts"]
+  }
+}

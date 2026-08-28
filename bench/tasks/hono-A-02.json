@@ -1,0 +1,10 @@
+{
+  "id": "hono-A-02",
+  "repo": "hono",
+  "category": "A",
+  "prompt": "In this Hono repository, find the helper that compares two secrets in a way that does not leak information through how long the comparison takes -- the one authentication middleware uses instead of a plain equality check. Report which file defines it. Do not change any code.",
+  "grade": {
+    "kind": "localization",
+    "expect_files": ["src/utils/buffer.ts"]
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "id": "flask-A-02",
+  "repo": "flask",
+  "category": "A",
+  "prompt": "In this Flask repository, find the class representing the object that is pushed when an application context becomes active -- the one that owns the storage behind the `g` proxy and is popped again when the context ends. Report which file defines it. Do not change any code.",
+  "grade": {
+    "kind": "localization",
+    "expect_files": ["src/flask/ctx.py"]
+  }
+}
