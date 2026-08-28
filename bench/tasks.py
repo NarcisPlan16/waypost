@@ -24,7 +24,7 @@ CATEGORIES = {
     "E": "control",
 }
 
-GRADER_KINDS = {"localization", "tests", "diff", "judge"}
+GRADER_KINDS = {"localization", "tests", "diff", "rubric"}
 
 # Required and optional keys per grader kind. Anything else in a ``grade``
 # block is a typo, and a typo that silently grades nothing is worse than a
@@ -33,7 +33,7 @@ _GRADE_FIELDS: dict[str, tuple[set[str], set[str]]] = {
     "localization": ({"expect_files"}, set()),
     "tests": (set(), {"command"}),
     "diff": ({"expect_files"}, {"expect_contains", "expect_absent"}),
-    "judge": ({"rubric"}, set()),
+    "rubric": ({"expect_all"}, {"expect_files"}),
 }
 
 _TASK_KEYS = {"id", "repo", "category", "prompt", "grade", "setup"}
@@ -65,6 +65,31 @@ class Task:
 def _require(condition: bool, message: str) -> None:
     if not condition:
         raise TaskError(message)
+
+
+def _check_rubric(expect_all: Any, where: str) -> None:
+    """Validate a rubric's anchor groups.
+
+    The shape is a list of groups, each a list of alternative phrasings, and
+    a run must match *every* group by *any* of its alternatives. A bare list
+    of strings is the tempting shorthand and is rejected: it reads as "any of
+    these" to a task author and would grade as "all of these", turning a
+    one-character mistake into a silently harsher grader.
+    """
+    _require(
+        isinstance(expect_all, list) and bool(expect_all),
+        f"grade.expect_all must be a non-empty array{where}",
+    )
+    for group in expect_all:
+        _require(
+            isinstance(group, list) and bool(group),
+            f"each expect_all entry must be a non-empty array of alternatives{where}",
+        )
+        for alternative in group:
+            _require(
+                isinstance(alternative, str) and alternative.strip() != "",
+                f"expect_all alternatives must be non-empty strings{where}",
+            )
 
 
 def parse_task(data: Any, source: Path | None = None) -> Task:
@@ -99,6 +124,9 @@ def parse_task(data: Any, source: Path | None = None) -> Task:
     _require(not missing_grade, f"grade.{kind} needs {missing_grade}{where}")
     extra_grade = sorted(keys - required - optional)
     _require(not extra_grade, f"unknown grade key(s) {extra_grade} for kind {kind!r}{where}")
+
+    if kind == "rubric":
+        _check_rubric(grade["expect_all"], where)
 
     setup = data.get("setup", [])
     _require(isinstance(setup, list), f"setup must be an array{where}")

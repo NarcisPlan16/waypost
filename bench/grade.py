@@ -1,12 +1,22 @@
 """Graders.
 
-Categories B, C and E grade automatically here. A and D -- localization and
-trace/explain -- are only partly automatable: naming the right file is
-checkable, but judging an explanation needs a *different* model, blind to the
-arm, and that belongs with the run that produces explanations to judge. The
-``judge`` grader is therefore a declared stub that returns ``None`` (ungraded)
-rather than a guess, so an ungraded task can never be silently counted as a
-success by whichever arm happened to be more verbose.
+Every category now grades automatically and offline. Category D --
+trace/explain -- was the hold-out: judging prose properly wants a second
+model, blind to the arm, and until that exists a ``judge`` stub returned
+``None`` so a verbose arm could never be scored as a correct one. But an
+ungraded category is not free. It is a fifth of the matrix producing API
+spend and no verdict, and the paid run is the scarce resource here, so D is
+graded by *anchors* instead: a set of groups, each listing alternative
+phrasings, all of which the answer must hit.
+
+That is a weaker grader than a judge and the weakness has a direction worth
+stating. An anchor rubric rewards naming things, and the waypost arm is
+handed symbol names by the index, so it can in principle satisfy an anchor it
+did not understand. Two things keep that honest: the anchors are chosen to
+name behaviour that only appears inside a function body rather than in any
+signature the map prints, and category E exists precisely to expose a harness
+that flatters the tool. Read a D result as "did the run find and describe the
+right machinery", never as "was the explanation good".
 """
 
 from __future__ import annotations
@@ -62,8 +72,8 @@ def grade(
         return _grade_diff(task, worktree)
     if kind == "tests":
         return _grade_tests(task, worktree, test_command)
-    if kind == "judge":
-        return Verdict(None, "judge grader is not wired up yet; run is ungraded")
+    if kind == "rubric":
+        return _grade_rubric(task, result)
     raise ValueError(f"unknown grade kind {kind!r}")
 
 
@@ -84,6 +94,38 @@ def _grade_localization(task: Task, result: LoopResult) -> Verdict:
     if missing:
         return Verdict(False, f"final answer did not name {missing}")
     return Verdict(True, f"named all of {expected}")
+
+
+def _grade_rubric(task: Task, result: LoopResult) -> Verdict:
+    """Did the final answer hit every anchor group?
+
+    Matching is case-insensitive and whitespace-collapsed so that a line wrap
+    between two words of an anchor does not fail a correct answer; it is
+    otherwise literal. ``expect_files`` is checked with the same
+    path-separator normalisation the other graders use.
+    """
+    haystack = _collapse(result.final_text)
+
+    expected_files = [_normalise(path) for path in task.grade.get("expect_files", [])]
+    missing_files = [path for path in expected_files if path.lower() not in haystack]
+    if missing_files:
+        return Verdict(False, f"final answer did not name {sorted(missing_files)}")
+
+    missed = [
+        group
+        for group in task.grade["expect_all"]
+        if not any(_collapse(alt) in haystack for alt in group)
+    ]
+    if missed:
+        # The first alternative is the canonical phrasing; reporting the whole
+        # group would make the failure line unreadable for a wide rubric.
+        return Verdict(False, f"final answer missed {[group[0] for group in missed]}")
+    return Verdict(True, f"hit all {len(task.grade['expect_all'])} anchor group(s)")
+
+
+def _collapse(text: str) -> str:
+    """Lowercase, normalise path separators, and collapse runs of whitespace."""
+    return " ".join(text.replace("\\", "/").lower().split())
 
 
 def _git_diff(worktree: Path, *args: str) -> str:

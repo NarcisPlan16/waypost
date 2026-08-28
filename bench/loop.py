@@ -19,6 +19,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from bench.models import ModelProfile, profile_for
 from bench.tools import ToolOutcome
 
 # From the roadmap: a run that has not finished in 40 turns is a failure, and
@@ -133,12 +134,17 @@ def run_task(
     effort: str = DEFAULT_EFFORT,
     max_tokens: int = MAX_TOKENS,
     turn_cap: int = TURN_CAP,
+    profile: ModelProfile | None = None,
 ) -> LoopResult:
     """Drive one task to completion, a turn cap, or a failure.
 
     Returns a :class:`LoopResult` in every case except a cache leak, which
     raises: a wrong number is worse than a missing one.
     """
+    # Resolved once, outside the turn loop: the request shape cannot change
+    # part-way through a run without making the run's token total meaningless.
+    extras = (profile or profile_for(model)).request_extras(effort, max_tokens)
+
     result = LoopResult()
     messages: list[dict[str, Any]] = [{"role": "user", "content": prompt}]
     started = time.monotonic()
@@ -155,8 +161,7 @@ def run_task(
             system=system,
             tools=tools,
             messages=messages,
-            thinking={"type": "adaptive"},
-            output_config={"effort": effort},
+            **extras,
         )
         result.turns += 1
 

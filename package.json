@@ -1,6 +1,6 @@
 {
   "name": "waypost",
-  "version": "0.1.0-dev.0",
+  "version": "0.1.0",
   "description": "Zero-LLM-call repo indexer that gives coding agents a token-frugal map of a codebase.",
   "bin": {
     "waypost": "bin/waypost.js"
