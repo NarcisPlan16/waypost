@@ -158,11 +158,39 @@ deliberately deferred.
 
 ## Benchmarks
 
-Nothing here yet. Measured token-reduction results land here once the
-Sprint 6 benchmark runs -- per-category reductions with confidence
-intervals, the pinned repo commits and model, run count, total cost, and
-a one-command reproduction. Until then, this project makes no
-performance claims.
+**No numbers yet, and none are implied.** The harness that will produce
+them lives in `bench/`; it has not been run against the API at scale, so
+this project still makes no performance claims.
+
+What the harness does: it runs the same coding tasks twice against a
+pinned checkout of a real repository -- once with an agent that has only
+`bash`, `read_file`, `grep` and `edit_file`, and once with the same agent
+plus waypost -- and compares the input tokens each spent. It drives the
+Anthropic API directly rather than going through any coding agent, whose
+context management and caching would make the difference unattributable.
+Prompt caching is off in both arms and every response is checked for it,
+each run gets a fresh git worktree, indexing happens outside the measured
+window, and the number of times the agent actually called waypost is
+recorded -- if that is near zero, the skill wording is the thing to fix,
+not the indexer.
+
+```bash
+uv sync --extra dev --extra bench
+python -m bench tasks                              # validate the task suite
+python -m bench run --dry-run --repo flask         # walk the matrix, no API calls
+python -m bench run --repo flask --trials 1        # asks before spending
+python -m bench report bench/results/<file>.jsonl
+```
+
+The report always breaks results out per category, including the control
+category, where the task prompt already names the file. A large "saving"
+there would mean the harness is biased rather than that the tool works,
+and that check is printed next to the headline, not buried.
+
+Two things are still stubs: the judge grader for explanation tasks (it
+reports runs as ungraded rather than guessing), and the `tests` grader,
+which works but needs a repository environment with the dependencies
+installed -- the seed tasks grade by diff instead.
 
 ## License
 

@@ -1,0 +1,25 @@
+{
+  "id": "hono-C-01",
+  "repo": "hono",
+  "category": "C",
+  "prompt": "Bug report: setting a cookie with maxAge: 0 no longer emits a Max-Age attribute. Expiring a cookie by setting Max-Age=0 is therefore broken; any positive maxAge still works. Find the cause and fix it.",
+  "setup": [
+    {
+      "path": "src/utils/cookie.ts",
+      "find": "typeof opt.maxAge === 'number' && opt.maxAge >= 0",
+      "replace": "typeof opt.maxAge === 'number' && opt.maxAge > 0"
+    }
+  ],
+  "grade": {
+    "kind": "diff",
+    "expect_files": [
+      "src/utils/cookie.ts"
+    ],
+    "expect_contains": [
+      "opt.maxAge >= 0"
+    ],
+    "expect_absent": [
+      "typeof opt.maxAge === 'number' && opt.maxAge > 0"
+    ]
+  }
+}

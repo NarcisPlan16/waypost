@@ -1,0 +1,10 @@
+{
+  "id": "flask-D-01",
+  "repo": "flask",
+  "category": "D",
+  "prompt": "Explain how a request in this Flask application reaches the view function that handles it: what happens between the WSGI callable being invoked and the view being called, and which objects and files are involved at each step. Do not change any code.",
+  "grade": {
+    "kind": "judge",
+    "rubric": "The explanation should trace the WSGI entry point through request context push, URL matching against the url_map, and dispatch to the view, naming the files that implement each step."
+  }
+}

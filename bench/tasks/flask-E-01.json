@@ -1,0 +1,12 @@
+{
+  "id": "flask-E-01",
+  "repo": "flask",
+  "category": "E",
+  "prompt": "In src/flask/config.py, explain what Config.from_prefixed_env does with the value of each matching environment variable before storing it, and what happens when the value is not valid JSON. Name the file you looked at in your answer. Do not change any code.",
+  "grade": {
+    "kind": "localization",
+    "expect_files": [
+      "src/flask/config.py"
+    ]
+  }
+}

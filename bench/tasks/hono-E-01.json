@@ -1,0 +1,12 @@
+{
+  "id": "hono-E-01",
+  "repo": "hono",
+  "category": "E",
+  "prompt": "In src/middleware/cors/index.ts, explain under what conditions the middleware sets the Access-Control-Max-Age header, and what it sets Access-Control-Allow-Origin to when the origin option is a function. Name the file you looked at in your answer. Do not change any code.",
+  "grade": {
+    "kind": "localization",
+    "expect_files": [
+      "src/middleware/cors/index.ts"
+    ]
+  }
+}

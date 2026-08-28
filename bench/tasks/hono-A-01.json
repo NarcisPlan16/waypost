@@ -1,0 +1,12 @@
+{
+  "id": "hono-A-01",
+  "repo": "hono",
+  "category": "A",
+  "prompt": "In this Hono repository, find the code that refuses to resolve a static file path containing a parent-directory ('..') segment. Report which file defines it. Do not change any code.",
+  "grade": {
+    "kind": "localization",
+    "expect_files": [
+      "src/utils/filepath.ts"
+    ]
+  }
+}

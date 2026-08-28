@@ -1,0 +1,12 @@
+{
+  "flask": {
+    "url": "https://github.com/pallets/flask",
+    "sha": "22d924701a6ae2e4cd01e9a15bbaf3946094af65",
+    "test_command": "python -m pytest -q"
+  },
+  "hono": {
+    "url": "https://github.com/honojs/hono",
+    "sha": "16eb88269ffb0ae68590ad55ac9ac58807850f26",
+    "test_command": "npm test"
+  }
+}

@@ -38,6 +38,12 @@ dev = [
     "ruff>=0.6",
     "mypy>=1.11",
 ]
+# The benchmark harness under bench/. Not part of the wheel, and not needed to
+# run the test suite: everything except bench/client.py is importable without
+# it, which is what keeps the harness covered by ordinary offline tests.
+bench = [
+    "anthropic>=0.70",
+]
 
 [project.scripts]
 waypost = "waypost.cli:main"
@@ -62,3 +68,6 @@ warn_unused_ignores = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# `bench/` is not an installed package -- it is deliberately outside the wheel
+# -- so the repository root has to be importable for its tests to find it.
+pythonpath = ["."]
