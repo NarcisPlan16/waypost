@@ -176,6 +176,7 @@ class Runner:
             "turns": result.turns,
             "wall_clock_s": round(result.wall_clock_s, 3),
             "tool_calls": dict(result.tool_calls),
+            "tool_trace": [call.as_record() for call in result.trace],
             "waypost_calls": result.tool_calls.get("waypost", 0),
             "stop_reason": result.stop_reason,
             "failure_reason": result.failure_reason,

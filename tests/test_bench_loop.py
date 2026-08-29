@@ -203,3 +203,62 @@ def test_hitting_max_tokens_is_a_failure_even_though_text_came_back():
     result = run(client)
     assert result.failure_reason == "max_tokens"
     assert result.final_text == "half an ans"
+
+
+def test_the_trace_records_each_call_in_order_with_its_output_size():
+    # The counts alone cannot say whether the model queried waypost and then
+    # read the file anyway. The ordered trace can, which is the whole point.
+    client = FakeClient(
+        [
+            Response(
+                content=[
+                    ToolUse(id="t1", name="waypost", input={"command": "find", "args": "Foo"})
+                ],
+                stop_reason="tool_use",
+            ),
+            Response(
+                content=[ToolUse(id="t2", name="read_file", input={"path": "src/foo.py"})],
+                stop_reason="tool_use",
+            ),
+            Response(content=[Text("done")]),
+        ]
+    )
+    result = run(client, execute=lambda name, _inp: ToolOutcome("x" * 12))
+
+    assert [(c.turn, c.name, c.arg) for c in result.trace] == [
+        (1, "waypost", "find Foo"),
+        (2, "read_file", "src/foo.py"),
+    ]
+    assert [c.output_bytes for c in result.trace] == [12, 12]
+    assert not any(c.is_error for c in result.trace)
+
+
+def test_the_trace_marks_a_failed_call():
+    client = FakeClient(
+        [
+            Response(
+                content=[ToolUse(id="t1", name="bash", input={"command": "false"})],
+                stop_reason="tool_use",
+            ),
+            Response(content=[Text("done")]),
+        ]
+    )
+    result = run(client, execute=lambda name, _inp: ToolOutcome("boom", is_error=True))
+
+    assert [(c.name, c.arg, c.is_error) for c in result.trace] == [("bash", "false", True)]
+
+
+def test_a_long_argument_is_truncated_so_a_forty_turn_trace_stays_readable():
+    client = FakeClient(
+        [
+            Response(
+                content=[ToolUse(id="t1", name="bash", input={"command": "echo " + "a" * 500})],
+                stop_reason="tool_use",
+            ),
+            Response(content=[Text("done")]),
+        ]
+    )
+    result = run(client)
+
+    assert len(result.trace[0].arg) == 200
+    assert result.trace[0].arg.endswith("...")

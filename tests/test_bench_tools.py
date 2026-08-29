@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-import shutil
 import sys
+import time
 
 import pytest
 
+from bench import tools
 from bench.tools import (
     BASELINE_TOOLS,
     MAX_TOOL_OUTPUT_BYTES,
@@ -93,7 +94,11 @@ def test_calls_are_counted_per_tool(repo):
     assert execute.calls["read_file"] == 2
 
 
-@pytest.mark.skipif(shutil.which("grep") is None, reason="grep is not on PATH")
+# No skipif here, deliberately. This test used to be skipped whenever `grep`
+# was missing from PATH -- which is exactly the host where the baseline arm's
+# only search tool was silently returning an error for every call, and the
+# benchmark was crediting the difference to waypost. The tool no longer shells
+# out, so there is nothing left to skip on.
 def test_grep_reports_no_matches_rather_than_failing(repo):
     execute = Executor(repo)
     hit = execute("grep", {"pattern": "build_client"})
@@ -120,3 +125,77 @@ def test_waypost_tool_runs_the_real_cli(repo):
     outcome = execute("waypost", {"command": "find", "args": ["build_client"]})
     assert not outcome.is_error
     assert "build_client" in outcome.content
+
+
+def test_grep_never_depends_on_an_external_binary(repo, monkeypatch):
+    # Emptying PATH would have broken the old shell-out entirely.
+    monkeypatch.setenv("PATH", "")
+    outcome = Executor(repo)("grep", {"pattern": "build_client"})
+    assert not outcome.is_error
+    assert "src/app.py" in outcome.content
+
+
+def test_grep_numbers_lines_and_filters_by_glob_and_path(repo):
+    execute = Executor(repo)
+    hit = execute("grep", {"pattern": "build_client", "glob": "*.py"})
+    assert hit.content.startswith("./src/app.py:1:")
+
+    scoped = execute("grep", {"pattern": "build_client", "path": "src"})
+    assert "src/app.py" in scoped.content
+
+    assert execute("grep", {"pattern": "build_client", "glob": "*.md"}).content == "[no matches]"
+
+
+def test_grep_rejects_a_bad_pattern_instead_of_raising(repo):
+    outcome = Executor(repo)("grep", {"pattern": "def ("})
+    assert outcome.is_error and "regular expression" in outcome.content
+
+
+def test_grep_skips_the_generated_index_and_binary_files(repo):
+    (repo / ".waypost").mkdir(exist_ok=True)
+    (repo / ".waypost" / "index.json").write_text('"name": "build_client"', encoding="utf-8")
+    (repo / "blob.bin").write_bytes(b"build_client" + bytes(3))
+
+    outcome = Executor(repo)("grep", {"pattern": "build_client"})
+    # The index exists in both arms; a baseline grep matching inside the
+    # tool-under-test's own output would be measuring the benchmark.
+    assert ".waypost" not in outcome.content
+    assert "blob.bin" not in outcome.content
+
+
+def test_bash_runs_a_posix_shell_when_the_host_has_one(repo):
+    execute = Executor(repo)
+    if execute.shell is None:  # pragma: no cover - host without any POSIX shell
+        pytest.skip("no POSIX shell on this host")
+    # cmd.exe would fail on both of these, and only the baseline arm pays for
+    # that, so the failure reads as a saving for waypost.
+    assert execute("bash", {"command": "echo hi | cat"}).content.strip() == "hi"
+    assert not execute("bash", {"command": "ls src"}).is_error
+
+
+def test_bash_is_given_no_stdin(repo):
+    # A command that reads stdin would otherwise inherit the harness's and
+    # block forever; nothing in a benchmark task should be interactive.
+    execute = Executor(repo)
+    if execute.shell is None:  # pragma: no cover - host without any POSIX shell
+        pytest.skip("no POSIX shell on this host")
+    assert not execute("bash", {"command": "cat"}).is_error
+
+
+def test_bash_timeout_kills_grandchildren_not_just_the_shell(repo, monkeypatch):
+    # `Popen.kill` only kills the shell. A surviving grandchild keeps the
+    # stdout pipe open, so the drain never returns and the timeout is fiction:
+    # a real `find /` ran on past its 120s cap for twelve minutes.
+    execute = Executor(repo)
+    if execute.shell is None:  # pragma: no cover - host without any POSIX shell
+        pytest.skip("no POSIX shell on this host")
+    monkeypatch.setattr(tools, "TOOL_TIMEOUT_S", 2)
+
+    started = time.monotonic()
+    outcome = execute("bash", {"command": "sleep 60 | cat"})
+    elapsed = time.monotonic() - started
+
+    assert outcome.is_error and "timed out" in outcome.content
+    # Generous, but far below the 60s the grandchild wanted: if the tree
+    # survived, the drain would hold this open until KILL_DRAIN_S expired.
+    assert elapsed < 2 + tools.KILL_DRAIN_S

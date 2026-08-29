@@ -12,14 +12,26 @@ Two deliberate choices here decide whether the benchmark is fair:
 - **Output is truncated at the same byte cap in both arms.** The cap is part
   of the measured quantity: a baseline arm allowed to dump unbounded file
   contents into context would look artificially bad.
+- **The baseline tools must actually work on the host.** They did not: `grep`
+  shelled out to a binary that is absent from PATH under PowerShell, and
+  `shell=True` on Windows is cmd.exe, so the agent's `grep -rn` failed too.
+  Both failures land only on the arm that still has to search, and the Sonnet
+  batch of 2026-08-29 measured 8 of 8 baseline greps erroring while treatment
+  had none. A control that cannot search does not measure grep-and-read, it
+  flatters the tool. `grep` is now implemented in-process, and the shell is
+  resolved to a real POSIX one.
 """
 
 from __future__ import annotations
 
+import fnmatch
 import os
+import re
 import shutil
+import signal
 import subprocess
 import sys
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -27,7 +39,15 @@ from typing import Any
 # Big enough that a real file read is not crippled, small enough that a
 # runaway `cat` on a vendored bundle cannot dominate a run's token count.
 MAX_TOOL_OUTPUT_BYTES = 20_000
+
+# Directories `grep -rnI --exclude-dir=.git` would have walked but should not.
+# `.waypost` is here because the harness builds an index in *both* arms: a
+# baseline grep that matches inside the tool-under-test's own generated JSON
+# is measuring the benchmark, not the repository.
+SKIP_DIRS = frozenset({".git", ".hg", ".svn", "node_modules", "__pycache__", ".waypost"})
 TOOL_TIMEOUT_S = 120
+# How long to wait for a killed process tree to release its pipes.
+KILL_DRAIN_S = 10
 
 WAYPOST_COMMANDS = ("map", "find", "show", "refs", "outline", "stats")
 
@@ -38,6 +58,30 @@ class ToolOutcome:
 
     content: str
     is_error: bool = False
+
+
+def _walk_files(base: Path) -> Iterator[Path]:
+    """Every file under *base*, skipping VCS and build directories."""
+    for root, dirs, names in os.walk(base):
+        dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS)
+        for name in sorted(names):
+            yield Path(root) / name
+
+
+def _text_lines(path: Path) -> Iterator[tuple[int, str]]:
+    """Numbered lines of *path*, or nothing at all if it is binary.
+
+    ``grep -I`` skips binary files, and so must this: a match inside a
+    compiled artefact is noise, and its bytes would blow the output cap.
+    """
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        return
+    if b"\x00" in raw[:8192]:
+        return
+    text = raw.decode("utf-8", errors="replace")
+    yield from enumerate(text.splitlines(), start=1)
 
 
 def _truncate(text: str) -> str:
@@ -110,7 +154,7 @@ WAYPOST_TOOL: dict[str, Any] = {
         "Query the repository's waypost index: a symbol-level map of the codebase "
         "built with tree-sitter, which never returns a whole file. command is one of: "
         "map (ranked symbol map of the repo; accepts --budget N and --focus PATH), "
-        "find (locate symbols by name, substring or glob), "
+        "find (a name's definitions, ranked; --all adds partial-name matches), "
         "show (one symbol's own source span), "
         "refs (where a symbol is defined and which files reference it), "
         "outline (every symbol in one file), "
@@ -156,6 +200,7 @@ class Executor:
         self.root = root.resolve()
         self.waypost_cmd = waypost_cmd or default_waypost_cmd()
         self.calls: dict[str, int] = {}
+        self.shell = posix_shell()
 
     def __call__(self, name: str, tool_input: dict[str, Any]) -> ToolOutcome:
         self.calls[name] = self.calls.get(name, 0) + 1
@@ -188,18 +233,22 @@ class Executor:
     # -- handlers --------------------------------------------------------
 
     def _run(self, argv: list[str], shell_command: str | None = None) -> ToolOutcome:
-        completed = subprocess.run(
-            shell_command if shell_command is not None else argv,
-            shell=shell_command is not None,
-            cwd=self.root,
-            capture_output=True,
-            text=True,
-            timeout=TOOL_TIMEOUT_S,
-            env=child_env(),
-        )
-        output = "".join(part for part in (completed.stdout, completed.stderr) if part)
-        if completed.returncode != 0:
-            output = f"{output}\n[exit code {completed.returncode}]".lstrip("\n")
+        # Prefer an explicit POSIX shell over ``shell=True``; see posix_shell.
+        # Falling back to the platform shell keeps a host without one running,
+        # but such a run is recorded as degraded rather than passed off as a
+        # comparison against a working baseline.
+        use_platform_shell = shell_command is not None and self.shell is None
+        if shell_command is not None and self.shell is not None:
+            command: Any = [self.shell, "-c", shell_command]
+        elif shell_command is not None:
+            command = shell_command
+        else:
+            command = argv
+
+        code, out, err = _capture(command, shell=use_platform_shell, cwd=self.root)
+        output = "".join(part for part in (out, err) if part)
+        if code != 0:
+            output = f"{output}\n[exit code {code}]".lstrip("\n")
         return ToolOutcome(_truncate(output) or "[no output]")
 
     def _bash(self, tool_input: dict[str, Any]) -> ToolOutcome:
@@ -227,38 +276,55 @@ class Executor:
         return ToolOutcome(_truncate(numbered) or "[empty]")
 
     def _grep(self, tool_input: dict[str, Any]) -> ToolOutcome:
+        """``grep -rnI``, in-process.
+
+        This used to shell out. It must not: the baseline arm's only search
+        tool cannot depend on a binary that may be missing from PATH, and when
+        it went missing the failure showed up as a large measured saving for
+        waypost rather than as an error anyone would notice.
+        """
         pattern = tool_input.get("pattern")
         if not isinstance(pattern, str) or pattern == "":
             return ToolOutcome("Error: pattern must be a non-empty string.", is_error=True)
-
-        argv = ["grep", "-rnI", "--exclude-dir=.git"]
-        glob = tool_input.get("glob")
-        if isinstance(glob, str) and glob:
-            argv.append(f"--include={glob}")
-        argv += ["-e", pattern]
+        try:
+            regex = re.compile(pattern)
+        except re.error as exc:
+            return ToolOutcome(f"Error: bad regular expression: {exc}", is_error=True)
 
         target = tool_input.get("path")
         if isinstance(target, str) and target:
             try:
-                self._resolve(target)
+                base = self._resolve(target)
             except ValueError as exc:
                 return ToolOutcome(f"Error: {exc}", is_error=True)
-            argv.append(target)
         else:
-            argv.append(".")
+            base = self.root
+        if not base.exists():
+            return ToolOutcome(f"Error: {target} does not exist.", is_error=True)
 
-        completed = subprocess.run(
-            argv,
-            cwd=self.root,
-            capture_output=True,
-            text=True,
-            timeout=TOOL_TIMEOUT_S,
-            env=child_env(),
-        )
-        # grep exits 1 for "no matches", which is an answer, not a failure.
-        if completed.returncode > 1:
-            return ToolOutcome(_truncate(completed.stderr) or "Error: grep failed.", is_error=True)
-        return ToolOutcome(_truncate(completed.stdout) or "[no matches]")
+        glob = tool_input.get("glob")
+        glob = glob if isinstance(glob, str) and glob else None
+
+        files = [base] if base.is_file() else sorted(_walk_files(base))
+        hits: list[str] = []
+        budget = MAX_TOOL_OUTPUT_BYTES
+        for path in files:
+            if glob and not fnmatch.fnmatch(path.name, glob):
+                continue
+            for number, line in _text_lines(path):
+                if not regex.search(line):
+                    continue
+                try:
+                    shown = path.relative_to(self.root).as_posix()
+                except ValueError:  # pragma: no cover - _resolve keeps us inside
+                    shown = path.as_posix()
+                hits.append(f"./{shown}:{number}:{line}")
+                budget -= len(hits[-1]) + 1
+                if budget <= 0:
+                    return ToolOutcome(_truncate("\n".join(hits) + "\n"))
+        if not hits:
+            return ToolOutcome("[no matches]")
+        return ToolOutcome(_truncate("\n".join(hits) + "\n"))
 
     def _edit_file(self, tool_input: dict[str, Any]) -> ToolOutcome:
         raw_path = tool_input.get("path")
@@ -305,6 +371,170 @@ def default_waypost_cmd() -> list[str]:
     if found:
         return [found]
     return [sys.executable, "-m", "waypost"]
+
+
+JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
+JOBOBJECT_EXTENDED_LIMIT_INFORMATION = 9
+
+
+def _win_job_object() -> Any:
+    """A job object that kills everything assigned to it when it is closed.
+
+    ``taskkill /T`` is not enough on Windows. MSYS -- which is what Git's bash
+    is -- emulates fork, and the grandchildren it spawns do not keep a Windows
+    parent link back to the shell: a runaway ``find /`` was observed with a
+    parent pid that was never the shell's. Walking the tree therefore misses
+    exactly the processes worth killing. A job object catches them regardless
+    of re-parenting, which is the only mechanism here that actually holds.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    class IO_COUNTERS(ctypes.Structure):
+        _fields_ = [
+            (name, ctypes.c_ulonglong)
+            for name in (
+                "ReadOperationCount",
+                "WriteOperationCount",
+                "OtherOperationCount",
+                "ReadTransferCount",
+                "WriteTransferCount",
+                "OtherTransferCount",
+            )
+        ]
+
+    class BASIC_LIMIT(ctypes.Structure):
+        _fields_ = [
+            ("PerProcessUserTimeLimit", wintypes.LARGE_INTEGER),
+            ("PerJobUserTimeLimit", wintypes.LARGE_INTEGER),
+            ("LimitFlags", wintypes.DWORD),
+            ("MinimumWorkingSetSize", ctypes.c_size_t),
+            ("MaximumWorkingSetSize", ctypes.c_size_t),
+            ("ActiveProcessLimit", wintypes.DWORD),
+            ("Affinity", ctypes.POINTER(ctypes.c_ulong)),
+            ("PriorityClass", wintypes.DWORD),
+            ("SchedulingClass", wintypes.DWORD),
+        ]
+
+    class EXTENDED_LIMIT(ctypes.Structure):
+        _fields_ = [
+            ("BasicLimitInformation", BASIC_LIMIT),
+            ("IoInfo", IO_COUNTERS),
+            ("ProcessMemoryLimit", ctypes.c_size_t),
+            ("JobMemoryLimit", ctypes.c_size_t),
+            ("PeakProcessMemoryUsed", ctypes.c_size_t),
+            ("PeakJobMemoryUsed", ctypes.c_size_t),
+        ]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    job = kernel32.CreateJobObjectW(None, None)
+    if not job:
+        raise ctypes.WinError(ctypes.get_last_error())
+    limits = EXTENDED_LIMIT()
+    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    kernel32.SetInformationJobObject(
+        job, JOBOBJECT_EXTENDED_LIMIT_INFORMATION, ctypes.byref(limits), ctypes.sizeof(limits)
+    )
+    return job
+
+
+def _kill_tree(process: subprocess.Popen[str], job: Any = None) -> None:
+    """Kill *process* and everything it started.
+
+    ``Popen.kill`` kills only the direct child. A shell that has spawned a
+    long-running grandchild leaves that grandchild holding the stdout pipe, so
+    the drain that follows never returns and the timeout does not exist in
+    practice -- which is how one agent's ``find /`` stalled a batch for twelve
+    minutes with a 120-second cap configured, and went on scanning the disk
+    after the shell above it was killed.
+    """
+    if sys.platform == "win32":
+        if job is not None:
+            import ctypes
+
+            ctypes.WinDLL("kernel32", use_last_error=True).TerminateJobObject(job, 1)
+        process.kill()
+        return
+    try:
+        os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):  # pragma: no cover - race with exit
+        process.kill()
+
+
+def _capture(command: Any, *, shell: bool, cwd: Path) -> tuple[int, str, str]:
+    """Run *command*, returning ``(returncode, stdout, stderr)``.
+
+    Two things this does that ``subprocess.run`` does not: it kills the whole
+    process tree when the timeout expires, and it gives the child no stdin. A
+    tool that inherits the harness's stdin can block forever on a command that
+    happens to read it, and nothing in a benchmark task should be interactive.
+    """
+    job = _win_job_object() if sys.platform == "win32" else None
+    process = subprocess.Popen(
+        command,
+        shell=shell,
+        cwd=cwd,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=child_env(),
+        start_new_session=sys.platform != "win32",
+    )
+    try:
+        if job is not None:
+            import ctypes
+
+            ctypes.WinDLL("kernel32", use_last_error=True).AssignProcessToJobObject(
+                job,
+                int(process._handle),  # type: ignore[attr-defined]
+            )
+        try:
+            out, err = process.communicate(timeout=TOOL_TIMEOUT_S)
+            return process.returncode, out, err
+        except subprocess.TimeoutExpired:
+            _kill_tree(process, job)
+            try:
+                process.communicate(timeout=KILL_DRAIN_S)
+            except subprocess.TimeoutExpired:  # pragma: no cover - tree refused to die
+                pass
+            raise
+    finally:
+        if job is not None:
+            import ctypes
+
+            ctypes.WinDLL("kernel32", use_last_error=True).CloseHandle(job)
+
+
+def posix_shell() -> str | None:
+    """A real POSIX shell for the ``bash`` tool, or ``None`` if the host has none.
+
+    The agent under test writes Unix commands. ``shell=True`` runs cmd.exe on
+    Windows, so every ``grep -rn`` and multi-line ``python -c`` it writes fails
+    -- and only in the arm that still needs to search, which silently converts
+    a platform quirk into a measured reduction.
+
+    WSL's ``System32\bash.exe`` is rejected on purpose: it runs in a different
+    filesystem namespace, so the Windows worktree path handed to it would not
+    resolve, and the tool would fail in a new and more confusing way.
+    """
+    if os.name != "nt":
+        return shutil.which("bash") or shutil.which("sh")
+
+    found = shutil.which("bash")
+    candidates = [found] if found and "system32" not in found.lower() else []
+    git = shutil.which("git")
+    if git:
+        # <install>/cmd/git.exe -> <install>/bin/bash.exe
+        candidates.append(str(Path(git).parent.parent / "bin" / "bash.exe"))
+    candidates += [
+        r"C:\Program Files\Gitinash.exe",
+        r"C:\Program Files (x86)\Gitinash.exe",
+    ]
+    for candidate in candidates:
+        if candidate and Path(candidate).is_file():
+            return candidate
+    return None
 
 
 def child_env() -> dict[str, str]:

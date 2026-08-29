@@ -14,6 +14,7 @@ the token accounting and the cache-leak guard testable offline.
 
 from __future__ import annotations
 
+import json
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -73,6 +74,64 @@ class TurnUsage:
         return self.input_tokens + self.cache_read_input_tokens + self.cache_creation_input_tokens
 
 
+# A trace entry records *bytes*, not tokens, on purpose. Counting tokens here
+# would pull the tokenizer -- and `tiktoken`'s first-use BPE download -- into
+# the middle of a paid run, and the trace only ever needs to answer "which
+# call was big relative to its neighbours", which bytes answer for free.
+TRACE_ARG_CHARS = 200
+
+
+@dataclass(frozen=True)
+class ToolCallRecord:
+    """One tool call, in the order it happened.
+
+    The counts in :attr:`LoopResult.tool_calls` say *how many* waypost calls a
+    run made; they cannot say whether the model queried waypost and then read
+    the file anyway. That question is what separates "the tool is wrong" from
+    "the wording is wrong", so the sequence is recorded, not just the tally.
+    """
+
+    turn: int
+    name: str
+    arg: str
+    output_bytes: int
+    is_error: bool = False
+
+    def as_record(self) -> dict[str, Any]:
+        return {
+            "turn": self.turn,
+            "name": self.name,
+            "arg": self.arg,
+            "output_bytes": self.output_bytes,
+            "is_error": self.is_error,
+        }
+
+
+def _arg_summary(name: str, tool_input: dict[str, Any]) -> str:
+    """A short, readable rendering of what the call asked for.
+
+    Deliberately lossy: this is read by a human comparing a treatment run
+    against its baseline, and a full argument dump would make a 40-turn trace
+    unreadable. The waypost case keeps subcommand and args intact, because
+    that is the pair the diagnosis turns on.
+    """
+    if name == "waypost":
+        parts = [str(tool_input.get("command", "")), str(tool_input.get("args", ""))]
+        text = " ".join(part for part in parts if part)
+    elif name == "bash":
+        text = str(tool_input.get("command", ""))
+    elif name in ("read_file", "edit_file"):
+        text = str(tool_input.get("path", ""))
+    elif name == "grep":
+        text = str(tool_input.get("pattern", ""))
+    else:
+        text = json.dumps(tool_input, sort_keys=True)[:TRACE_ARG_CHARS]
+    text = " ".join(text.split())
+    if len(text) > TRACE_ARG_CHARS:
+        text = text[: TRACE_ARG_CHARS - 3] + "..."
+    return text
+
+
 @dataclass
 class LoopResult:
     """The measured outcome of one task run, before grading."""
@@ -80,6 +139,7 @@ class LoopResult:
     turns: int = 0
     usage: list[TurnUsage] = field(default_factory=list)
     tool_calls: dict[str, int] = field(default_factory=dict)
+    trace: list[ToolCallRecord] = field(default_factory=list)
     final_text: str = ""
     stop_reason: str | None = None
     failure_reason: str | None = None
@@ -209,6 +269,15 @@ def run_task(
             tool_input = dict(getattr(block, "input", {}) or {})
             outcome = execute(name, tool_input)
             result.tool_calls[name] = result.tool_calls.get(name, 0) + 1
+            result.trace.append(
+                ToolCallRecord(
+                    turn=result.turns,
+                    name=name,
+                    arg=_arg_summary(name, tool_input),
+                    output_bytes=len(outcome.content.encode("utf-8", errors="replace")),
+                    is_error=outcome.is_error,
+                )
+            )
             entry: dict[str, Any] = {
                 "type": "tool_result",
                 "tool_use_id": getattr(block, "id", ""),
