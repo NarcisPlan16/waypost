@@ -1,8 +1,8 @@
 """Index construction, persistence and incremental refresh.
 
 Responsibilities (Sprint 2):
-    - Serialise the schema (version 1) to ``.waypost/index.json``, and
-      validate it on read.
+    - Serialise the schema (:data:`SCHEMA_VERSION`) to
+      ``.waypost/index.json``, and validate it on read.
     - Refresh incrementally: compare each file's content SHA against the
       stored one, reparse only what changed, drop entries for deleted files,
       and recompute ranks (cheap enough to always do in full).
@@ -34,10 +34,16 @@ from waypost.walk import iter_files
 
 logger = logging.getLogger(__name__)
 
-# Bump when the on-disk shape changes. `load` refuses anything else and
-# triggers a full rebuild rather than guessing how to migrate it.
+# Bump when the on-disk shape changes, or when stored values that were
+# computed from the source stop matching what this version would compute.
+# `load` refuses anything else and triggers a full rebuild rather than
+# guessing how to migrate it.
 # 2: added `rank_strategy` and `focus`.
-SCHEMA_VERSION = 2
+# 3: same shape, different numbers -- `rank.py` now splits an ambiguous
+#    name's reference credit 1/N. Every stored `rank` is wrong without a
+#    rebuild, and a stale index looks perfectly valid, so the version is the
+#    only thing that can catch it.
+SCHEMA_VERSION = 3
 
 # Relative to a repo root -- kept in one place so `index`, CLI commands and
 # tests all agree on where the index lives.

@@ -151,6 +151,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=render.DEFAULT_FIND_LIMIT,
         help=f"maximum hits (default: {render.DEFAULT_FIND_LIMIT})",
     )
+    p_find.add_argument(
+        "--all",
+        action="store_true",
+        dest="all_matches",
+        help="list every partial match too, not just the exact-name definitions",
+    )
 
     p_show = subparsers.add_parser("show", help="print one symbol's own source span")
     _add_common(p_show)
@@ -290,10 +296,26 @@ def _cmd_find(args: argparse.Namespace) -> int:
     idx, _ = _acquire_index(args)
     hits = render.search(idx, args.pattern, limit=args.limit)
     if args.json:
-        _emit_json(render.find_data(idx, args.pattern, limit=args.limit, hits=hits), args)
+        _emit_json(
+            render.find_data(
+                idx,
+                args.pattern,
+                limit=args.limit,
+                hits=hits,
+                all_matches=args.all_matches,
+            ),
+            args,
+        )
     else:
         _emit(
-            render.render_find(idx, args.pattern, limit=args.limit, budget=args.budget, hits=hits),
+            render.render_find(
+                idx,
+                args.pattern,
+                limit=args.limit,
+                budget=args.budget,
+                hits=hits,
+                all_matches=args.all_matches,
+            ),
             args,
         )
     return EXIT_OK if hits else EXIT_NOT_FOUND

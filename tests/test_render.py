@@ -248,6 +248,52 @@ def test_find_never_exceeds_its_budget(index, budget):
     assert count(render.render_find(index, "c", budget=budget)) <= budget
 
 
+def test_find_leads_with_the_exact_definition_and_summarises_the_rest(index):
+    # The regression this guards: `find Client` printed `build_client` and
+    # every other substring match in full, so answering "where is this class"
+    # cost 49x what the grep it was meant to replace costs.
+    out = render.render_find(index, "Client")
+
+    assert "class Client" in out
+    assert "build_client" not in out
+    assert "(--all to list)" in out
+
+
+def test_find_all_still_lists_every_partial_match(index):
+    out = render.render_find(index, "Client", all_matches=True)
+
+    assert "class Client" in out
+    assert "build_client" in out
+    assert "(--all to list)" not in out
+
+
+def test_find_lists_everything_when_nothing_matches_exactly(index):
+    # A discovery query has no exact tier to lead with; answering it with a
+    # bare count would make the command useless.
+    out = render.render_find(index, "buil")
+
+    assert "build_client" in out
+    assert "(--all to list)" not in out
+
+
+def test_find_json_says_how_many_partial_matches_it_withheld(index):
+    data = render.find_data(index, "Client")
+
+    assert [h["name"] for h in data["hits"]] == ["Client"]
+    assert data["partial_omitted"] >= 1
+    assert data["count"] == len(data["hits"])
+
+    everything = render.find_data(index, "Client", all_matches=True)
+    assert everything["partial_omitted"] == 0
+    assert len(everything["hits"]) > len(data["hits"])
+
+
+def test_find_does_not_state_a_partial_count_it_cannot_know(index):
+    # Truncated at the limit, the count is a floor, not a total.
+    out = render.render_find(index, "Client", limit=2)
+    assert "at least" in out
+
+
 # --------------------------------------------------------------------------
 # show -- the span, and only the span
 # --------------------------------------------------------------------------

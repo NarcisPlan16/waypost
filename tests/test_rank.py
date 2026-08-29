@@ -153,3 +153,92 @@ def test_focus_matches_a_path_prefix_but_not_a_partial_directory_name():
     assert not matches_focus("src/api/routes.py", [])
     # A leading dot is part of the name, not something to strip.
     assert matches_focus(".github/workflows/ci.yml", [".github"])
+
+
+def _def(name: str) -> Symbol:
+    return Symbol(name=name, kind="function", line=1, end_line=2, signature=f"def {name}()")
+
+
+def test_ambiguous_reference_splits_its_credit_between_the_definers():
+    # `get` is defined in three files, so one reference to it is worth one
+    # point in total, not three. This is the Flask defect in miniature.
+    files = {
+        "a.py": _file("a.py", defs=[_def("get")]),
+        "b.py": _file("b.py", defs=[_def("get")]),
+        "c.py": _file("c.py", defs=[_def("get")]),
+        "caller.py": _file("caller.py", refs=[Reference(name="get", kind="call", line=1)]),
+    }
+
+    counts = inbound_reference_counts(files)
+
+    assert counts["a.py"] == counts["b.py"] == counts["c.py"] == 1 / 3
+    assert sum(counts.values()) == 1.0
+
+
+def test_a_unique_name_still_earns_full_credit():
+    files = {
+        "lib.py": _file("lib.py", defs=[_def("very_specific_helper")]),
+        "caller.py": _file(
+            "caller.py", refs=[Reference(name="very_specific_helper", kind="call", line=1)]
+        ),
+    }
+
+    assert inbound_reference_counts(files)["lib.py"] == 1.0
+
+
+def test_a_uniquely_named_symbol_outranks_a_much_referenced_ambiguous_one():
+    # The regression that mattered: a test file defining a method called
+    # `get` outranked the source file everything actually depends on.
+    defs_get = [_def("get")]
+    files = {"noisy.py": _file("noisy.py", defs=defs_get)}
+    for i in range(9):
+        files[f"other{i}.py"] = _file(f"other{i}.py", defs=defs_get)
+    files["core.py"] = _file("core.py", defs=[_def("build_app")])
+    files["caller.py"] = _file(
+        "caller.py",
+        refs=[Reference(name="get", kind="call", line=i) for i in range(5)]
+        + [Reference(name="build_app", kind="call", line=99)],
+    )
+
+    counts = inbound_reference_counts(files)
+
+    assert counts["noisy.py"] == 0.5  # 5 refs / 10 definers
+    assert counts["core.py"] == 1.0
+    assert counts["core.py"] > counts["noisy.py"]
+
+
+def test_one_file_defining_a_name_twice_is_not_paid_twice():
+    # `Client.get` and `Server.get` both index the tail `get`, but the file
+    # defines that name once.
+    lib = _file(
+        "lib.py",
+        defs=[
+            Symbol(name="Client.get", kind="function", line=1, end_line=2, signature="def get()"),
+            Symbol(name="Server.get", kind="function", line=4, end_line=5, signature="def get()"),
+        ],
+    )
+    caller = _file("caller.py", refs=[Reference(name="get", kind="call", line=1)])
+
+    assert inbound_reference_counts({"lib.py": lib, "caller.py": caller})["lib.py"] == 1.0
+
+
+def test_pagerank_spends_less_on_an_ambiguous_edge_than_a_certain_one():
+    # `caller.py` references `get` (defined in 3 files) and `build_app`
+    # (defined in 1). The certain edge must carry the larger share.
+    files = {
+        "a.py": _file("a.py", defs=[_def("get")]),
+        "b.py": _file("b.py", defs=[_def("get")]),
+        "c.py": _file("c.py", defs=[_def("get")]),
+        "core.py": _file("core.py", defs=[_def("build_app")]),
+        "caller.py": _file(
+            "caller.py",
+            refs=[
+                Reference(name="get", kind="call", line=1),
+                Reference(name="build_app", kind="call", line=2),
+            ],
+        ),
+    }
+
+    scores = pagerank_rank(files)
+
+    assert scores["core.py"] > scores["a.py"]

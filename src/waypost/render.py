@@ -418,6 +418,48 @@ def _symbol_dict(symbol: Symbol, depth: int | None = None) -> dict:
 # --------------------------------------------------------------------------
 
 
+def _is_exact(name: str, needle: str) -> bool:
+    """True if ``name``, or its last segment, *is* ``needle`` (lowercased)."""
+    lowered = name.lower()
+    return lowered == needle or lowered.rsplit(".", 1)[-1] == needle
+
+
+def partition_hits(hits: Sequence[Hit], pattern: str) -> tuple[list[Hit], list[Hit]]:
+    """Split hits into the ones that *are* ``pattern`` and the ones that merely contain it.
+
+    ``find AppContext`` on Flask matches 22 definitions, of which one is the
+    class asked for; the other 21 are ``do_teardown_appcontext``,
+    ``with_appcontext``, the class's own methods and seven test functions.
+    Printing all 22 cost 586 tokens to answer "where is this class", against
+    12 for the ``grep`` an agent would otherwise run -- so a command meant to
+    undercut grep instead cost 49x more, which is the whole product promise
+    inverted.
+
+    A glob pattern has no exact tier by construction (``*_client`` is equal
+    to no symbol's name), which is right: a glob is a discovery query and
+    every match is the answer.
+    """
+    needle = pattern.lower()
+    exact = [h for h in hits if _is_exact(h.symbol.name, needle)]
+    partial = [h for h in hits if not _is_exact(h.symbol.name, needle)]
+    return exact, partial
+
+
+def _partial_summary(partial: Sequence[Hit], *, capped: bool) -> str:
+    """The one line that stands in for the partial matches not printed.
+
+    ``capped`` means the search itself stopped at ``--limit``, so the count
+    is a floor rather than a total and must not be printed as if it were one.
+    """
+    files = len({h.path for h in partial})
+    n = len(partial)
+    return (
+        f"+ {'at least ' if capped else ''}{n} other symbol{'' if n == 1 else 's'}"
+        f" whose name contains this, in {files} file{'' if files == 1 else 's'}"
+        f" (--all to list)"
+    )
+
+
 def search(index: Index, pattern: str, *, limit: int = DEFAULT_FIND_LIMIT) -> list[Hit]:
     """Symbols matching ``pattern``, best-ranked file first.
 
@@ -436,18 +478,15 @@ def search(index: Index, pattern: str, *, limit: int = DEFAULT_FIND_LIMIT) -> li
             return fnmatch.fnmatch(name.lower(), needle) or fnmatch.fnmatch(tail.lower(), needle)
         return needle in name.lower()
 
-    def exactness(name: str) -> int:
-        lowered = name.lower()
-        tail = lowered.rsplit(".", 1)[-1]
-        return 0 if lowered == needle or tail == needle else 1
-
     hits = [
         Hit(path=path, rank=entry.rank, symbol=symbol)
         for path, entry in index.files.items()
         for symbol in entry.parsed.defs
         if matches(symbol.name)
     ]
-    hits.sort(key=lambda h: (exactness(h.symbol.name), -h.rank, h.path, h.symbol.line))
+    hits.sort(
+        key=lambda h: (0 if _is_exact(h.symbol.name, needle) else 1, -h.rank, h.path, h.symbol.line)
+    )
     return hits[:limit]
 
 
@@ -459,16 +498,29 @@ def render_find(
     budget: int = DEFAULT_LIST_BUDGET,
     tokenizer: Tokenizer | None = None,
     hits: Sequence[Hit] | None = None,
+    all_matches: bool = False,
 ) -> str:
     """``hits`` lets a caller that already searched pass the result in.
 
     The CLI needs the hits anyway, to pick an exit code. Without this it
     searched every symbol in the index twice per invocation.
+
+    By default only the exact-name tier is printed, with the partial matches
+    summarised in one line -- see :func:`partition_hits`. ``all_matches``
+    (the CLI's ``--all``) prints every hit, which is the old behaviour.
     """
     hits = search(index, pattern, limit=limit) if hits is None else hits
     if not hits:
         return f"no symbol matching {pattern!r} in {len(index.files)} indexed files"
-    lines = [_hit_line(hit) for hit in hits]
+    exact, partial = partition_hits(hits, pattern)
+    # With no exact tier there is nothing to lead with, and suppressing the
+    # partials would answer a discovery query with a bare count.
+    if all_matches or not exact:
+        lines = [_hit_line(hit) for hit in hits]
+    else:
+        lines = [_hit_line(hit) for hit in exact]
+        if partial:
+            lines.append(_partial_summary(partial, capped=len(hits) >= limit))
     return _render(lines, budget, tokenizer)
 
 
@@ -478,13 +530,19 @@ def find_data(
     *,
     limit: int = DEFAULT_FIND_LIMIT,
     hits: Sequence[Hit] | None = None,
+    all_matches: bool = False,
 ) -> dict:
     hits = search(index, pattern, limit=limit) if hits is None else hits
+    exact, partial = partition_hits(hits, pattern)
+    shown = hits if (all_matches or not exact) else exact
     return {
         "pattern": pattern,
-        "count": len(hits),
+        "count": len(shown),
+        # What the text output summarises in its trailing line, so a JSON
+        # consumer can tell "one definition" from "one of 22 matches".
+        "partial_omitted": 0 if shown is hits else len(partial),
         "hits": [
-            {"path": h.path, "rank": round(h.rank, 4), **_symbol_dict(h.symbol)} for h in hits
+            {"path": h.path, "rank": round(h.rank, 4), **_symbol_dict(h.symbol)} for h in shown
         ],
     }
 

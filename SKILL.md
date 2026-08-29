@@ -8,17 +8,24 @@ description: Use before grepping or opening files to understand a codebase's str
 `waypost` indexes a repository with tree-sitter and serves a symbol-level
 view of it through a CLI. It answers "what's in this codebase and where" far
 cheaper than grep-and-read, because it never returns a whole file — only
-signatures, one-line doc summaries, and (for `show`) a single symbol's own
-span.
+signatures, one-line doc summaries, and, for `show`, one symbol's complete
+source. `show` gives you the real code: after it you do not need to open the
+file.
 
 ## When to use it
 
 - **Getting oriented in an unfamiliar repo or directory.** Run `waypost map`
   instead of opening several files to see what's there.
-- **Finding a symbol by name.** `waypost find <pattern>` (substring or glob)
-  instead of grepping for a definition.
-- **Reading one function or class.** `waypost show <symbol>` returns just
-  that symbol's source, not the surrounding file.
+- **Reading one function or class — the common case.** `waypost show <name>`
+  returns that symbol's whole source and nothing around it. It takes a bare
+  name (`waypost show wsgi_app`), so you do not need the qualified
+  `Class.method` form, and you do not need to locate it first. Go straight
+  here whenever you want to *see* code: one call, no follow-up read.
+- **Finding where a name is defined, when the location is the answer.**
+  `waypost find <pattern>` instead of grepping for a definition. Leads with
+  the exact-name definitions; `--all` adds the partial-name matches. `find`
+  returns locations, not bodies — if what you actually wanted was the code,
+  you wanted `show`, and reaching for `find` first costs you a round trip.
 - **Finding callers/usages of a symbol.** `waypost refs <symbol>` instead of
   a repo-wide grep for its name.
 - **Seeing everything defined in one file.** `waypost outline <path>`
@@ -26,17 +33,12 @@ span.
 
 ## When NOT to use it
 
-- **You already know the exact file and need to edit it.** Read the file
-  directly — waypost's outputs are signatures, not full bodies, and editing
-  needs the real source anyway.
-- **The symbol isn't Python, JS, TS, or TSX.** waypost only parses those
-  languages; it will not find symbols in other files, and `find`/`show`
-  reporting nothing is expected there, not a bug.
-- **You need the literal current file content for a diff or a write.** The
-  index can be stale relative to uncommitted changes; pass `--refresh` first
-  if freshness matters, or just read the file.
-- **The repo is tiny (a handful of files).** The overhead of indexing isn't
-  worth it — just read the files.
+- **You are about to edit, diff or write.** Read the file: an edit has to
+  match surrounding bytes `show` does not give you, and the index can lag
+  uncommitted changes (`--refresh` fixes staleness, not the missing context).
+- **The file isn't Python, JS, TS, or TSX.** waypost parses only those, so
+  `find`/`show` finding nothing elsewhere is expected, not a bug.
+- **The repo is tiny (a handful of files).** Just read them.
 
 ## Commands
 
@@ -44,27 +46,18 @@ span.
 waypost index                     # build/refresh .waypost/index.json (once, then on demand)
 waypost map --budget 2000         # ranked symbol map across the repo, budgeted in tokens
 waypost map --focus src/api       # same map, with these paths sorted first
-waypost find "*_client"           # locate symbols by name (substring or glob)
-waypost show Client.request       # one symbol's own source span, nothing around it
+waypost show wsgi_app             # one symbol's full source, nothing around it (bare name is fine)
+waypost find Client               # only where that name is defined (--all: partial matches too)
 waypost refs build_client         # where a symbol is defined, and every file that calls it
 waypost outline src/client.py     # every symbol in one file
 waypost stats                     # what the index currently holds
 ```
 
-Every command accepts `--root <path>` (defaults to cwd), `--json` for
-machine-readable output, and `--measure` to print the output's real token
-count to stderr. The six query commands additionally accept `--budget <n>`
-to cap token output and `--refresh` to re-index changed files before
-answering (`index` takes neither: it always writes, and it is what `--refresh`
-calls). A missing index is built automatically on first use. Exit code `1`
-means nothing matched (not an error); `2` means a real failure (bad root,
-bad flag).
+All commands take `--root <path>` (default cwd), `--json`, and `--measure`
+(real token count to stderr). The six query commands also take `--budget <n>`
+and `--refresh` (re-index changed files first — use it if an answer looks
+stale). A missing index is built on first use. Exit `1` means nothing matched;
+`2` is a real failure.
 
-## Notes
-
-- Every output respects a measured token budget (via the configured
-  tokenizer) — it will never dump enough content to blow a context window.
-- No network access and no LLM calls happen anywhere in this tool. It is
-  pure static analysis.
-- If a query command's answer looks stale (a symbol you just added is
-  missing), re-run with `--refresh` before concluding it doesn't exist.
+Every output respects a measured token budget, so no command can blow a
+context window. No network and no LLM calls anywhere: pure static analysis.
