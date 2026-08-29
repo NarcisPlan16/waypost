@@ -53,12 +53,58 @@ def test_a_run_that_did_not_complete_fails_regardless_of_what_it_said():
     assert "turn_cap" in verdict.detail
 
 
-def test_judge_is_ungraded_rather_than_guessed():
-    task = make_task(category="D", grade={"kind": "judge", "rubric": "explain it"})
-    verdict = grade(task, finished("a long explanation"), None)  # type: ignore[arg-type]
-    # None, not False and not True: an ungraded run must never be counted as a
-    # success by whichever arm happened to be more verbose.
-    assert verdict.success is None
+RUBRIC = {
+    "kind": "rubric",
+    "expect_files": ["src/config.py"],
+    "expect_all": [["wsgi_app"], ["url_map", "url map"]],
+}
+
+
+def test_rubric_passes_when_every_group_is_hit():
+    task = make_task(category="D", grade=RUBRIC)
+    answer = "src/config.py defines wsgi_app, which consults the url map."
+    verdict = grade(task, finished(answer), None)  # type: ignore[arg-type]
+    assert verdict.success is True
+
+
+def test_rubric_needs_all_groups_not_just_one():
+    task = make_task(category="D", grade=RUBRIC)
+    answer = "src/config.py defines wsgi_app."
+    verdict = grade(task, finished(answer), None)  # type: ignore[arg-type]
+    assert verdict.success is False
+    assert "url_map" in verdict.detail
+
+
+def test_rubric_group_is_satisfied_by_any_alternative():
+    task = make_task(category="D", grade=RUBRIC)
+    # "url map" rather than "url_map": alternatives exist so that a correct
+    # answer is not failed for prose phrasing.
+    answer = "src/config.py defines wsgi_app and matches against the URL map."
+    assert grade(task, finished(answer), None).success is True  # type: ignore[arg-type]
+
+
+def test_rubric_tolerates_a_line_wrap_inside_an_anchor():
+    task = make_task(category="D", grade={"kind": "rubric", "expect_all": [["request context"]]})
+    answer = "it pushes a request" + chr(10) + "   context onto the stack"
+    assert grade(task, finished(answer), None).success is True  # type: ignore[arg-type]
+
+
+def test_rubric_still_requires_the_expected_files():
+    task = make_task(category="D", grade=RUBRIC)
+    answer = "wsgi_app consults the url_map, but I will not say where."
+    verdict = grade(task, finished(answer), None)  # type: ignore[arg-type]
+    assert verdict.success is False
+    assert "src/config.py" in verdict.detail
+
+
+def test_rubric_never_returns_ungraded():
+    """Category D is the reason the report has an ungraded column at all.
+
+    It is now graded, and that must not silently regress: an ungraded run
+    costs API spend and yields no verdict.
+    """
+    task = make_task(category="D", grade=RUBRIC)
+    assert grade(task, finished("nothing relevant"), None).success is False  # type: ignore[arg-type]
 
 
 def test_diff_grader_checks_files_and_fragments(repo):

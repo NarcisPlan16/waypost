@@ -4,7 +4,16 @@
   "category": "D",
   "prompt": "Explain how a handler's return value becomes the Response that Hono sends: what c.text and c.json each do, where the status code and headers set earlier on the context are held before the Response exists, and how they end up on the final Response object. Name the files involved. Do not change any code.",
   "grade": {
-    "kind": "judge",
-    "rubric": "The explanation should centre on the Context class in src/context.ts, describe how headers and status are buffered on the context and applied when the body is produced, and mention the response helpers (text/json/html/body) rather than only naming the file."
+    "kind": "rubric",
+    "expect_files": [
+      "src/context.ts"
+    ],
+    "expect_all": [
+      ["newResponse"],
+      ["c.text", "text()"],
+      ["c.json", "json()"],
+      ["Content-Type"],
+      ["status"]
+    ]
   }
 }

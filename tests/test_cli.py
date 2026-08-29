@@ -265,6 +265,17 @@ def test_find_exits_zero_on_a_hit(indexed, capsys):
     assert "src/app/client.py:" in out
 
 
+def test_find_all_flag_widens_the_default_exact_only_output(indexed, capsys):
+    code, narrow, _err = run(capsys, "find", "--root", str(indexed), "Client")
+    assert code == EXIT_OK
+    assert "build_client" not in narrow
+
+    code, wide, _err = run(capsys, "find", "--root", str(indexed), "Client", "--all")
+    assert code == EXIT_OK
+    assert "build_client" in wide
+    assert len(wide) > len(narrow)
+
+
 def test_show_prints_only_the_symbols_span(indexed, capsys):
     code, out, _err = run(capsys, "show", "--root", str(indexed), "build_client")
     assert code == EXIT_OK

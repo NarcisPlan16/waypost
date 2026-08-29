@@ -187,10 +187,43 @@ category, where the task prompt already names the file. A large "saving"
 there would mean the harness is biased rather than that the tool works,
 and that check is printed next to the headline, not buried.
 
-Two things are still stubs: the judge grader for explanation tasks (it
-reports runs as ungraded rather than guessing), and the `tests` grader,
-which works but needs a repository environment with the dependencies
-installed -- the seed tasks grade by diff instead.
+Every task in the suite grades automatically and offline, so no paid run
+produces an ungraded result. Explanation tasks are graded by anchors --
+groups of alternative phrasings, all of which the answer must contain --
+rather than by a second model. That is deliberately weaker than a judge,
+and weaker in a known direction: anchors reward naming things, and the
+waypost arm is handed symbol names by the index. Read those results as
+"did the run find the right machinery", not as "was the explanation
+good". One grader is still conditional rather than stubbed: `tests` works
+but needs a checkout with the dependencies installed, so the seed tasks
+grade by diff.
+
+The request shape is per-model (`bench/models.py`), because it has to be:
+`output_config.effort` and adaptive thinking are current-generation
+parameters that Claude Haiku 4.5 rejects outright. An unrecognised model
+-- a self-hosted endpoint, say -- is sent neither, and is reported as
+unpriced rather than free.
+
+### What a lookup costs
+
+Separately from the benchmark, and requiring no API key, `bench context`
+measures one narrow thing: how many tokens `waypost show` hands an agent
+for a symbol, against the cost of reading the file that defines it. It
+walks every symbol in the index rather than a chosen sample, so the
+numbers cannot be steered by picking flattering queries.
+
+```bash
+python -m bench context --all          # every pinned repo, no API calls
+```
+
+**This is an upper bound on input-side savings, not a result.** It is
+generous to waypost -- a real agent also pays for the grep that found the
+symbol and for files it opened and discarded, none of which is counted --
+and harsh on the baseline, which at least gets the surrounding context
+that `show` withholds, and sometimes that context is what solves the
+task. Whether withholding it costs anything is exactly the question only
+the paid benchmark can answer. Recorded output is in
+`bench/results/context-*.json`.
 
 ## License
 

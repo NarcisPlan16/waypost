@@ -16,4 +16,8 @@ waypost v0.1 Build Plan.html
 waypost v0.1 Build Plan_files/
 Concept.md
 bench/.cache/
-bench/results/
+# Raw run output is machine-specific noise, but the committed probe results
+# are evidence the README points at. A negation cannot re-include a file
+# under an excluded *directory*, so the exclusion has to be the glob.
+bench/results/*
+!bench/results/context-*.json

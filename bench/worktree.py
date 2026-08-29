@@ -172,6 +172,12 @@ def run_worktree(
     if target.exists():
         shutil.rmtree(target, ignore_errors=True)
 
+    # A batch killed mid-run (or one whose tool timeout took the process down)
+    # leaves the directory gone but still registered, and every later `worktree
+    # add` then fails with "missing but already registered". The cleanup in the
+    # `finally` below cannot cover that case, because the process never got
+    # there. Pruning first makes a killed batch cost only its own runs.
+    _git(["worktree", "prune"], cwd=clone)
     _git(["worktree", "add", "--detach", str(target), spec.sha], cwd=clone)
     try:
         # Order matters: the index must describe the tree the model will see,

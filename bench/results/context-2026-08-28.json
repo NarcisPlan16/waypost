@@ -1,0 +1,184 @@
+[
+  {
+    "label": "flask",
+    "map_budget": 2000,
+    "orientation": {
+      "files": 83,
+      "map_tokens": 1984,
+      "repo_tokens": 130399
+    },
+    "root": "D:\\Personal\\Codi\\waypost\\bench\\.cache\\probe\\flask-22d92470",
+    "show_budget": 800,
+    "symbols": {
+      "count": 1587,
+      "file_tokens_total": 7990941,
+      "iqr": [
+        0.9318993841075838,
+        0.9883907883992205
+      ],
+      "median_file_tokens": 2834,
+      "median_reduction": 0.9726684248381683,
+      "median_show_tokens": 71,
+      "pooled_reduction": 0.973374600062746,
+      "show_tokens_total": 212762,
+      "worse_than_file": 20
+    },
+    "tokenizer": "TiktokenTokenizer"
+  },
+  {
+    "label": "requests",
+    "map_budget": 2000,
+    "orientation": {
+      "files": 37,
+      "map_tokens": 1988,
+      "repo_tokens": 94437
+    },
+    "root": "D:\\Personal\\Codi\\waypost\\bench\\.cache\\probe\\requests-5460f467",
+    "show_budget": 800,
+    "symbols": {
+      "count": 886,
+      "file_tokens_total": 10509581,
+      "iqr": [
+        0.9569415308909582,
+        0.995133338608847
+      ],
+      "median_file_tokens": 7943.0,
+      "median_reduction": 0.9883500094775217,
+      "median_show_tokens": 100.0,
+      "pooled_reduction": 0.9870199392344947,
+      "show_tokens_total": 136415,
+      "worse_than_file": 4
+    },
+    "tokenizer": "TiktokenTokenizer"
+  },
+  {
+    "label": "rich",
+    "map_budget": 2000,
+    "orientation": {
+      "files": 213,
+      "map_tokens": 1996,
+      "repo_tokens": 514597
+    },
+    "root": "D:\\Personal\\Codi\\waypost\\bench\\.cache\\probe\\rich-9d8f9a37",
+    "show_budget": 800,
+    "symbols": {
+      "count": 2226,
+      "file_tokens_total": 13274210,
+      "iqr": [
+        0.9079133238506303,
+        0.9889565914793144
+      ],
+      "median_file_tokens": 4737.0,
+      "median_reduction": 0.9690886129149388,
+      "median_show_tokens": 103.0,
+      "pooled_reduction": 0.9709782352396112,
+      "show_tokens_total": 385241,
+      "worse_than_file": 50
+    },
+    "tokenizer": "TiktokenTokenizer"
+  },
+  {
+    "label": "django",
+    "map_budget": 2000,
+    "orientation": {
+      "files": 2974,
+      "map_tokens": 1986,
+      "repo_tokens": 4177901
+    },
+    "root": "D:\\Personal\\Codi\\waypost\\bench\\.cache\\probe\\django-3b767c5f",
+    "show_budget": 800,
+    "symbols": {
+      "count": 42723,
+      "file_tokens_total": 425196488,
+      "iqr": [
+        0.9341491793358524,
+        0.9908596152513264
+      ],
+      "median_file_tokens": 4610,
+      "median_reduction": 0.9764397905759162,
+      "median_show_tokens": 103,
+      "pooled_reduction": 0.9830751400750045,
+      "show_tokens_total": 7196391,
+      "worse_than_file": 600
+    },
+    "tokenizer": "TiktokenTokenizer"
+  },
+  {
+    "label": "hono",
+    "map_budget": 2000,
+    "orientation": {
+      "files": 375,
+      "map_tokens": 1993,
+      "repo_tokens": 508583
+    },
+    "root": "D:\\Personal\\Codi\\waypost\\bench\\.cache\\probe\\hono-16eb8826",
+    "show_budget": 800,
+    "symbols": {
+      "count": 1572,
+      "file_tokens_total": 5501602,
+      "iqr": [
+        0.8450521756390807,
+        0.9835544434960325
+      ],
+      "median_file_tokens": 1718.0,
+      "median_reduction": 0.9501971134052651,
+      "median_show_tokens": 79.0,
+      "pooled_reduction": 0.9574978342671825,
+      "show_tokens_total": 233830,
+      "worse_than_file": 55
+    },
+    "tokenizer": "TiktokenTokenizer"
+  },
+  {
+    "label": "express",
+    "map_budget": 2000,
+    "orientation": {
+      "files": 141,
+      "map_tokens": 1996,
+      "repo_tokens": 136968
+    },
+    "root": "D:\\Personal\\Codi\\waypost\\bench\\.cache\\probe\\express-023767fe",
+    "show_budget": 800,
+    "symbols": {
+      "count": 254,
+      "file_tokens_total": 659723,
+      "iqr": [
+        0.8466388778615853,
+        0.9857963955140513
+      ],
+      "median_file_tokens": 1520.0,
+      "median_reduction": 0.9448795999976851,
+      "median_show_tokens": 71.5,
+      "pooled_reduction": 0.9576231236443173,
+      "show_tokens_total": 27957,
+      "worse_than_file": 11
+    },
+    "tokenizer": "TiktokenTokenizer"
+  },
+  {
+    "label": "zod",
+    "map_budget": 2000,
+    "orientation": {
+      "files": 489,
+      "map_tokens": 1996,
+      "repo_tokens": 904947
+    },
+    "root": "D:\\Personal\\Codi\\waypost\\bench\\.cache\\probe\\zod-773a4867",
+    "show_budget": 800,
+    "symbols": {
+      "count": 3689,
+      "file_tokens_total": 59644483,
+      "iqr": [
+        0.9537037037037037,
+        0.99635230457049
+      ],
+      "median_file_tokens": 10099,
+      "median_reduction": 0.9891518737672583,
+      "median_show_tokens": 88,
+      "pooled_reduction": 0.9910928056833018,
+      "show_tokens_total": 531265,
+      "worse_than_file": 38
+    },
+    "tokenizer": "TiktokenTokenizer"
+  }
+]

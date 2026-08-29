@@ -11,15 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-# Cached from the pricing table, in dollars per million tokens. Used only for
-# the pre-flight estimate printed before a batch spends anything; nothing in
-# the results depends on it.
-PRICING = {
-    "claude-opus-5": (5.0, 25.0),
-    "claude-opus-4-8": (5.0, 25.0),
-    "claude-sonnet-5": (2.0, 10.0),
-    "claude-haiku-4-5": (1.0, 5.0),
-}
+from bench.models import profile_for
 
 
 class ApiClient:
@@ -104,9 +96,16 @@ def build_client(dry_run: bool = False) -> Any:
 
 
 def estimate_cost(model: str, input_tokens: int, output_tokens: int) -> float | None:
-    """Dollar estimate for a batch, or ``None`` for an unpriced model."""
-    prices = PRICING.get(model)
-    if prices is None:
+    """Dollar estimate for a batch, or ``None`` for an unpriced model.
+
+    Unpriced is the honest answer for a self-hosted or unrecognised model, and
+    the CLI prints that rather than a fabricated zero -- "this run is free"
+    should come from the operator knowing their own hardware, not from the
+    harness failing to find a price.
+    """
+    profile = profile_for(model)
+    if profile.input_price is None or profile.output_price is None:
         return None
-    input_price, output_price = prices
-    return (input_tokens / 1_000_000) * input_price + (output_tokens / 1_000_000) * output_price
+    return (input_tokens / 1_000_000) * profile.input_price + (
+        output_tokens / 1_000_000
+    ) * profile.output_price
